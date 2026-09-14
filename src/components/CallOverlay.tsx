@@ -1,0 +1,323 @@
+import { useEffect, useRef, useState } from 'react';
+import { useAppContext } from '../store/AppContext';
+import {
+  Mic, MicOff, Video, VideoOff, PhoneOff, Monitor, MonitorOff,
+  Users, Maximize2, Minimize2, Volume2
+} from 'lucide-react';
+
+export default function CallOverlay() {
+  const { state, dispatch } = useAppContext();
+  const { call, chats } = state;
+  const [elapsed, setElapsed] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const screenRef = useRef<HTMLVideoElement>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+
+  const activeChat = call.chatId ? chats.find(c => c.id === call.chatId) : null;
+
+  useEffect(() => {
+    if (!call.isActive) {
+      setElapsed(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setElapsed(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [call.isActive]);
+
+  useEffect(() => {
+    if (call.isActive && call.type === 'video' && !call.isCameraOff) {
+      startCamera();
+    }
+    return () => {
+      stopCamera();
+    };
+  }, [call.isActive, call.type, call.isCameraOff]);
+
+  useEffect(() => {
+    if (call.isScreenSharing) {
+      startScreenShare();
+    } else {
+      stopScreenShare();
+    }
+  }, [call.isScreenSharing]);
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.log('Camera access denied or not available');
+    }
+  };
+
+  const stopCamera = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+  };
+
+  const startScreenShare = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { cursor: 'always' } as any,
+        audio: true,
+      });
+      screenStreamRef.current = stream;
+      if (screenRef.current) {
+        screenRef.current.srcObject = stream;
+      }
+      stream.getVideoTracks()[0].onended = () => {
+        dispatch({ type: 'TOGGLE_SCREEN_SHARE' });
+      };
+    } catch (err) {
+      console.log('Screen share access denied');
+      dispatch({ type: 'TOGGLE_SCREEN_SHARE' });
+    }
+  };
+
+  const stopScreenShare = () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(track => track.stop());
+      screenStreamRef.current = null;
+    }
+  };
+
+  const endCall = () => {
+    stopCamera();
+    stopScreenShare();
+    dispatch({ type: 'END_CALL' });
+  };
+
+  const formatDuration = (seconds: number) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  if (!call.isActive) return null;
+
+  return (
+    <div className={`fixed inset-0 z-50 flex flex-col ${isFullscreen ? '' : 'bg-gray-950/95 backdrop-blur-xl'}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 bg-gray-900/80 backdrop-blur-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-xl">
+            {activeChat?.avatar || '👤'}
+          </div>
+          <div>
+            <h3 className="text-sm font-medium text-white">{activeChat?.name || 'Звонок'}</h3>
+            <p className="text-xs text-green-400 flex items-center gap-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+              {formatDuration(elapsed)}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {call.type === 'video' && (
+            <button
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              className="p-2 rounded-lg hover:bg-gray-800 text-gray-400 transition-colors"
+            >
+              {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </button>
+          )}
+          {activeChat?.type === 'group' && (
+            <div className="flex items-center gap-1 px-3 py-1.5 bg-gray-800 rounded-lg">
+              <Users className="w-4 h-4 text-gray-400" />
+              <span className="text-sm text-gray-300">{call.participants.length + 1}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 relative flex items-center justify-center overflow-hidden">
+        {/* Screen Share */}
+        {call.isScreenSharing && (
+          <div className="absolute inset-0 bg-black flex items-center justify-center">
+            <video
+              ref={screenRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-contain"
+            />
+            <div className="absolute top-4 left-4 px-3 py-1.5 bg-red-500/90 rounded-lg text-white text-sm flex items-center gap-2">
+              <Monitor className="w-4 h-4" />
+              Трансляция экрана
+            </div>
+          </div>
+        )}
+
+        {/* Video Grid */}
+        {call.type === 'video' && !call.isScreenSharing && (
+          <div className={`grid gap-3 p-4 w-full h-full ${
+            call.participants.length <= 1
+              ? 'grid-cols-1'
+              : call.participants.length <= 3
+              ? 'grid-cols-2'
+              : 'grid-cols-3'
+          }`}>
+            {/* Local Video */}
+            <div className="relative rounded-xl overflow-hidden bg-gray-800">
+              {call.isCameraOff ? (
+                <div className="w-full h-full flex items-center justify-center">
+                  <div className="w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center text-4xl">
+                    👤
+                  </div>
+                </div>
+              ) : (
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover mirror"
+                />
+              )}
+              <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/60 rounded-md text-xs text-white">
+                Вы {call.isMuted && '(Muted)'}
+              </div>
+            </div>
+
+            {/* Remote Participants */}
+            {call.participants.map((participant) => (
+              <div key={participant.id} className="relative rounded-xl overflow-hidden bg-gray-800">
+                <div className="w-full h-full flex items-center justify-center">
+                  <div className="w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center text-4xl">
+                    {participant.avatar}
+                  </div>
+                </div>
+                <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/60 rounded-md text-xs text-white flex items-center gap-1.5">
+                  {participant.name}
+                  <div className="flex items-center gap-0.5">
+                    <Volume2 className="w-3 h-3 text-green-400" />
+                  </div>
+                </div>
+                {/* Simulated speaking indicator */}
+                <div className="absolute top-3 right-3 flex gap-0.5">
+                  {[...Array(3)].map((_, i) => (
+                    <div
+                      key={i}
+                      className="w-1 bg-green-500 rounded-full animate-pulse"
+                      style={{
+                        height: `${8 + Math.random() * 12}px`,
+                        animationDelay: `${i * 0.15}s`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Voice Call UI */}
+        {call.type === 'voice' && (
+          <div className="text-center">
+            <div className="w-32 h-32 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-6xl mb-6 mx-auto shadow-2xl shadow-blue-500/20 animate-pulse">
+              {activeChat?.avatar || '👤'}
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">{activeChat?.name}</h2>
+            <p className="text-gray-400">{formatDuration(elapsed)}</p>
+            {activeChat?.type === 'group' && (
+              <div className="mt-6 flex justify-center gap-3">
+                {call.participants.map((p) => (
+                  <div key={p.id} className="flex flex-col items-center gap-1">
+                    <div className="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center text-2xl border-2 border-gray-700">
+                      {p.avatar}
+                    </div>
+                    <span className="text-xs text-gray-400">{p.name.split(' ')[0]}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Screen share thumbnail (when in video call) */}
+        {call.isScreenSharing && call.type === 'video' && (
+          <div className="absolute bottom-24 right-4 w-48 h-32 rounded-xl overflow-hidden border-2 border-gray-700 shadow-xl bg-gray-800">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-black/60 rounded text-[10px] text-white">
+              Вы
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Controls */}
+      <div className="p-6 bg-gray-900/80 backdrop-blur-sm">
+        <div className="flex items-center justify-center gap-4">
+          {/* Mute */}
+          <button
+            onClick={() => dispatch({ type: 'TOGGLE_MUTE' })}
+            className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+              call.isMuted
+                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                : 'bg-gray-800 text-white hover:bg-gray-700'
+            }`}
+            title={call.isMuted ? 'Включить микрофон' : 'Выключить микрофон'}
+          >
+            {call.isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+          </button>
+
+          {/* Camera (video only) */}
+          {call.type === 'video' && (
+            <button
+              onClick={() => dispatch({ type: 'TOGGLE_CAMERA' })}
+              className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+                call.isCameraOff
+                  ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                  : 'bg-gray-800 text-white hover:bg-gray-700'
+              }`}
+              title={call.isCameraOff ? 'Включить камеру' : 'Выключить камеру'}
+            >
+              {call.isCameraOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+            </button>
+          )}
+
+          {/* Screen Share */}
+          <button
+            onClick={() => dispatch({ type: 'TOGGLE_SCREEN_SHARE' })}
+            className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+              call.isScreenSharing
+                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                : 'bg-gray-800 text-white hover:bg-gray-700'
+            }`}
+            title={call.isScreenSharing ? 'Остановить демонстрацию' : 'Демонстрация экрана'}
+          >
+            {call.isScreenSharing ? <MonitorOff className="w-6 h-6" /> : <Monitor className="w-6 h-6" />}
+          </button>
+
+          {/* End Call */}
+          <button
+            onClick={endCall}
+            className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition-all shadow-lg shadow-red-500/30"
+            title="Завершить звонок"
+          >
+            <PhoneOff className="w-7 h-7" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
