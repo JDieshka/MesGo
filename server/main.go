@@ -178,12 +178,14 @@ func (h *Hub) GetOnlineUsers() []string {
 // ============ WebRTC Signaling ============
 
 type SignalingMessage struct {
-	Type     string          `json:"type"` // offer, answer, ice-candidate, call-request, call-accept, call-end
-	From     string          `json:"from"`
-	To       string          `json:"to"`
-	ChatID   string          `json:"chatId"`
-	CallType string          `json:"callType,omitempty"` // voice, video
-	Data     json.RawMessage `json:"data,omitempty"`
+	Type         string          `json:"type"` // offer, answer, ice-candidate, call-request, call-accept, call-end
+	From         string          `json:"from"`
+	To           string          `json:"to"`
+	ChatID       string          `json:"chatId"`
+	CallType     string          `json:"callType,omitempty"` // voice, video
+	CallerName   string          `json:"callerName,omitempty"`
+	CallerAvatar string          `json:"callerAvatar,omitempty"`
+	Data         json.RawMessage `json:"data,omitempty"`
 }
 
 // ============ Globals ============

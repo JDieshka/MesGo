@@ -408,7 +408,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     });
 
-    // Initialize CallManager
+    // Initialize CallManager - it handles ALL signaling messages internally
+    // including call-request, call-accept, offer, answer, ice-candidate, call-end
     callManagerRef.current = new CallManager(ws, (callState) => {
       console.log('[AppContext] CallManager state update:', callState);
       // Convert CallManager state to AppState format
@@ -424,37 +425,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           duration: callState.duration,
           isIncoming: callState.isIncoming,
           callerName: callState.callerName,
+          callerAvatar: callState.callerAvatar,
         },
       });
-    });
-
-    // Listen for signaling messages (for calls)
-    ws.on('signaling', (payload: any) => {
-      console.log('[AppContext] Signaling message received:', payload.type);
-      
-      if (payload.type === 'call-request') {
-        // Incoming call
-        const chat = stateRef.current.chats.find(c => c.id === payload.chatId);
-        console.log('[AppContext] Incoming call from:', payload.from, 'in chat:', payload.chatId);
-        
-        dispatch({
-          type: 'START_CALL',
-          payload: {
-            chatId: payload.chatId,
-            type: payload.callType || 'voice',
-            isIncoming: true,
-            callerName: chat?.name || 'Unknown',
-            callerAvatar: chat?.avatar || '👤',
-          },
-        });
-      } else if (payload.type === 'call-accept') {
-        console.log('[AppContext] Call accepted');
-        dispatch({ type: 'UPDATE_CALL', payload: { isIncoming: false } });
-      } else if (payload.type === 'call-reject' || payload.type === 'call-end') {
-        console.log('[AppContext] Call ended/rejected');
-        dispatch({ type: 'END_CALL' });
-      }
-      // WebRTC signaling (offer, answer, ice-candidate) is handled by CallManager
     });
 
     // Connect
@@ -574,7 +547,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         chat.name,
         chat.avatar,
         otherParticipant.id,
-        type
+        type,
+        state.currentUser.avatar
       );
       console.log('[AppContext] Call initiated successfully');
     } catch (err) {

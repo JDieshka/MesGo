@@ -122,7 +122,7 @@ export default function CallOverlay() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Incoming call UI
+  // Incoming call UI - only show if call is active, incoming, and not yet connected
   if (call.isActive && call.isIncoming && call.duration === 0) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/95 backdrop-blur-xl">
@@ -147,7 +147,10 @@ export default function CallOverlay() {
               <PhoneOff className="w-7 h-7" />
             </button>
             <button
-              onClick={acceptCall}
+              onClick={() => {
+                console.log('[CallOverlay] Accept call clicked');
+                acceptCall();
+              }}
               className="w-16 h-16 rounded-full bg-green-600 hover:bg-green-700 text-white flex items-center justify-center transition-all shadow-lg shadow-green-500/30"
               title="Принять"
             >

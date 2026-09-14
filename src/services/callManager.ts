@@ -22,6 +22,7 @@ export interface CallState {
   duration: number;
   isIncoming: boolean;
   callerName: string;
+  callerAvatar: string;
 }
 
 type CallStateHandler = (state: CallState) => void;
@@ -58,6 +59,7 @@ export class CallManager {
       duration: 0,
       isIncoming: false,
       callerName: '',
+      callerAvatar: '',
     };
   }
 
@@ -66,7 +68,8 @@ export class CallManager {
     chatName: string,
     chatAvatar: string,
     targetUserId: string,
-    type: CallType
+    type: CallType,
+    callerAvatar: string = ''
   ): Promise<void> {
     console.log('[CallManager] Initiating call to:', targetUserId, 'type:', type);
 
@@ -79,6 +82,8 @@ export class CallManager {
       chatAvatar,
       participants: [],
       isIncoming: false,
+      callerName: chatName,
+      callerAvatar: callerAvatar,
     };
     this.stateHandler(this.state);
 
@@ -143,6 +148,8 @@ export class CallManager {
       to: targetUserId,
       chatId,
       callType: type,
+      callerName: this.state.callerName,
+      callerAvatar: this.state.callerAvatar,
     });
 
     // Save target user ID for later use
@@ -157,7 +164,12 @@ export class CallManager {
 
     console.log('[CallManager] Accepting call for chat:', this.state.chatId);
 
-    this.state.status = 'connecting';
+    // Update state immediately - no longer incoming
+    this.state = {
+      ...this.state,
+      status: 'connecting',
+      isIncoming: false, // CRITICAL: Mark as no longer incoming
+    };
     this.stateHandler(this.state);
 
     // Initialize WebRTC
@@ -299,7 +311,8 @@ export class CallManager {
           type: callType || 'voice',
           chatId,
           isIncoming: true,
-          callerName: from,
+          callerName: payload.callerName || from,
+          callerAvatar: payload.callerAvatar || '👤',
         };
         this.stateHandler(this.state);
         break;
