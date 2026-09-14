@@ -3,7 +3,9 @@
  * Handles user registration, login, and token management
  */
 
-const API_BASE_URL = 'http://localhost:8080';
+// Auto-detect API base URL from current page location
+// Works on localhost, local network (192.168.x.x), or any domain
+const API_BASE_URL = window.location.origin;
 
 export interface User {
   id: string;

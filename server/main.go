@@ -421,9 +421,15 @@ func main() {
 
 	port := ":8080"
 	log.Printf("🚀 GoTalk server starting on port %s", port)
-	log.Printf("📡 WebSocket endpoint: ws://localhost%s/ws/{userId}", port)
-	log.Printf("🔐 Auth endpoints: http://localhost%s/api/auth/", port)
-	log.Printf("💬 REST API: http://localhost%s/api/", port)
+	log.Printf("🌐 Server is accessible from all network interfaces (0.0.0.0)")
+	log.Printf("")
+	log.Printf("📡 Available endpoints:")
+	log.Printf("   Local:    http://localhost%s", port)
+	log.Printf("   Network:  http://<your-pc-ip>%s (e.g., http://192.168.1.156%s)", port, port)
+	log.Printf("   WebSocket: ws://<your-pc-ip>%s/ws/{userId}", port)
+	log.Printf("")
+	log.Printf("🔐 Auth endpoints: http://<your-pc-ip>%s/api/auth/", port)
+	log.Printf("💬 REST API: http://<your-pc-ip>%s/api/", port)
 
 	if err := http.ListenAndServe(port, router); err != nil {
 		log.Fatal("Server failed to start:", err)

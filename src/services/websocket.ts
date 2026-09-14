@@ -23,9 +23,13 @@ export class WebSocketClient {
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private isManualClose = false;
 
-  constructor(userId: string, baseUrl: string = 'ws://localhost:8080') {
+  constructor(userId: string, baseUrl?: string) {
     this.userId = userId;
-    this.url = `${baseUrl}/ws/${userId}`;
+    // Auto-detect WebSocket URL from current page location
+    // Works on localhost, local network (192.168.x.x), or any domain
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = baseUrl || `${protocol}//${window.location.host}`;
+    this.url = `${host}/ws/${userId}`;
   }
 
   connect(): void {
