@@ -174,6 +174,7 @@ const initialState: AppState = {
 type Action =
   | { type: 'SET_ACTIVE_CHAT'; payload: string }
   | { type: 'SET_CHATS'; payload: Chat[] }
+  | { type: 'SET_MESSAGES'; payload: { chatId: string; messages: Message[] } }
   | { type: 'SEND_MESSAGE'; payload: { chatId: string; message: Message } }
   | { type: 'RECEIVE_MESSAGE'; payload: { chatId: string; message: Message } }
   | { type: 'START_CALL'; payload: { chatId: string; type: 'voice' | 'video'; isIncoming?: boolean; callerName?: string; callerAvatar?: string } }
@@ -197,6 +198,15 @@ function reducer(state: AppState, action: Action): AppState {
 
     case 'SET_CHATS':
       return { ...state, chats: action.payload };
+
+    case 'SET_MESSAGES':
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [action.payload.chatId]: action.payload.messages,
+        },
+      };
 
     case 'SEND_MESSAGE': {
       const chatMessages = state.messages[action.payload.chatId] || [];
@@ -425,6 +435,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     loadChats();
   }, [state.currentUser.id]);
+
+  // Load messages for active chat
+  useEffect(() => {
+    const loadMessages = async () => {
+      if (!state.activeChatId) return;
+
+      try {
+        const messages = await apiService.getChatMessages(state.activeChatId);
+        
+        // Convert to app format
+        const appMessages: Message[] = messages.map(msg => ({
+          id: msg.id,
+          chatId: msg.chatId,
+          senderId: msg.senderId,
+          text: msg.text,
+          timestamp: new Date(msg.createdAt),
+          type: msg.type as any,
+          voiceDuration: msg.voiceDuration,
+          audioData: msg.audioData,
+          waveform: msg.waveform,
+          isRead: true,
+        }));
+
+        // Update state with messages
+        dispatch({ type: 'SET_MESSAGES', payload: { chatId: state.activeChatId, messages: appMessages } });
+
+        // Mark chat as read
+        await apiService.markChatAsRead(state.activeChatId);
+      } catch (err) {
+        console.error('Failed to load messages:', err);
+      }
+    };
+
+    loadMessages();
+  }, [state.activeChatId]);
 
   // Send text message
   const sendMessage = (chatId: string, text: string) => {

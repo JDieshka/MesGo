@@ -308,14 +308,13 @@ func handleChatMessage(client *Client, payload json.RawMessage) {
 		return
 	}
 
-	// Broadcast to chat participants
-	// Use the original payload which already contains all message data
+	// Broadcast to chat participants (exclude sender to avoid duplication)
 	response, _ := json.Marshal(WSMessage{
 		Type:    "chat-message",
 		Payload: payload,
 	})
 
-	hub.BroadcastToChat(chatMsg.ChatID, response, "")
+	hub.BroadcastToChat(chatMsg.ChatID, response, client.ID)
 	log.Printf("Message sent in chat %s by %s (type: %s)", chatMsg.ChatID, client.UserID, chatMsg.Message.Type)
 }
 

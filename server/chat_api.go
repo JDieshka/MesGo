@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -49,7 +51,8 @@ func SearchUsersHandler(w http.ResponseWriter, r *http.Request) {
 	var users []UserSearchResult
 	for rows.Next() {
 		var user UserSearchResult
-		err := rows.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Avatar, &user.Status, nil)
+		var lastSeen time.Time
+		err := rows.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Avatar, &user.Status, &lastSeen)
 		if err != nil {
 			continue
 		}
@@ -90,7 +93,8 @@ func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 	var users []UserInfo
 	for rows.Next() {
 		var user UserInfo
-		err := rows.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Avatar, &user.Status, nil)
+		var lastSeen time.Time
+		err := rows.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Avatar, &user.Status, &lastSeen)
 		if err != nil {
 			continue
 		}
@@ -154,7 +158,8 @@ func CreateChatHandler(w http.ResponseWriter, r *http.Request) {
 			// Create new private chat
 			chat, err = chatRepo.CreatePrivateChat(currentUserID, req.ParticipantIDs[0])
 			if err != nil {
-				http.Error(w, "Failed to create private chat", http.StatusInternalServerError)
+				log.Printf("Failed to create private chat: %v", err)
+				http.Error(w, "Failed to create private chat: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
 		}
