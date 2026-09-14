@@ -69,7 +69,7 @@ func generateSelfSignedCert(certFile, keyFile string) error {
 }
 
 // startHTTPSServer starts HTTPS server with self-signed certificate
-func startHTTPSServer(router *http.Handler, port string) error {
+func startHTTPSServer(router http.Handler, port string) error {
 	certFile := "cert.pem"
 	keyFile := "key.pem"
 
@@ -97,7 +97,7 @@ func startHTTPSServer(router *http.Handler, port string) error {
 	// Create HTTPS server
 	server := &http.Server{
 		Addr:      port,
-		Handler:   *router,
+		Handler:   router,
 		TLSConfig: tlsConfig,
 	}
 

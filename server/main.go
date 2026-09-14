@@ -458,7 +458,7 @@ func main() {
 	log.Printf("⚠️  Browser will show security warning (self-signed certificate)")
 	log.Printf("   Click 'Advanced' -> 'Proceed to 192.168.1.156 (unsafe)' to continue")
 
-	if err := startHTTPSServer(&router, port); err != nil {
+	if err := startHTTPSServer(router, port); err != nil {
 		log.Fatal("Server failed to start:", err)
 	}
 }
