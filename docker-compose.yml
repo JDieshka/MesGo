@@ -27,6 +27,7 @@ services:
       JWT_SECRET: your-super-secret-jwt-key-change-in-production
     ports:
       - "8080:8080"
+      - "8443:8443"
     depends_on:
       postgres:
         condition: service_healthy
