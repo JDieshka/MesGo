@@ -77,31 +77,44 @@ export default function CallOverlay() {
     if (!call.isActive || !callManager) return;
 
     const webrtc = callManager.getWebRTC();
-    if (!webrtc) return;
+    if (!webrtc) {
+      console.log('[CallOverlay] No WebRTC manager');
+      return;
+    }
+
+    console.log('[CallOverlay] Checking for remote streams...');
 
     // Get remote stream from WebRTC
     const remoteStream = webrtc.getRemoteStream();
     if (remoteStream) {
-      console.log('[CallOverlay] Remote stream received');
+      console.log('[CallOverlay] Remote stream received:', remoteStream);
+      console.log('[CallOverlay] Remote stream tracks:', remoteStream.getTracks());
       
       // Set video stream
       if (remoteVideoRef.current) {
+        console.log('[CallOverlay] Setting remote video stream');
         remoteVideoRef.current.srcObject = remoteStream;
       }
       
       // Set audio stream
       if (remoteAudioRef.current) {
+        console.log('[CallOverlay] Setting remote audio stream');
         remoteAudioRef.current.srcObject = remoteStream;
       }
+    } else {
+      console.log('[CallOverlay] No remote stream yet');
     }
 
     // Listen for remote stream changes
     const checkRemoteStream = setInterval(() => {
       const stream = webrtc.getRemoteStream();
-      if (stream && remoteVideoRef.current && remoteVideoRef.current.srcObject !== stream) {
-        console.log('[CallOverlay] Updating remote stream');
-        remoteVideoRef.current.srcObject = stream;
-        if (remoteAudioRef.current) {
+      if (stream) {
+        if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== stream) {
+          console.log('[CallOverlay] Updating remote video stream');
+          remoteVideoRef.current.srcObject = stream;
+        }
+        if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== stream) {
+          console.log('[CallOverlay] Updating remote audio stream');
           remoteAudioRef.current.srcObject = stream;
         }
       }
@@ -228,13 +241,7 @@ export default function CallOverlay() {
 
         {/* Video Grid */}
         {call.type === 'video' && !call.isScreenSharing && (
-          <div className={`grid gap-3 p-4 w-full h-full ${
-            call.participants.length <= 1
-              ? 'grid-cols-1'
-              : call.participants.length <= 3
-              ? 'grid-cols-2'
-              : 'grid-cols-3'
-          }`}>
+          <div className="grid grid-cols-2 gap-3 p-4 w-full h-full">
             {/* Local Video */}
             <div className="relative rounded-xl overflow-hidden bg-gray-800">
               {call.isCameraOff ? (
@@ -257,45 +264,38 @@ export default function CallOverlay() {
               </div>
             </div>
 
-            {/* Remote Participants */}
-            {call.participants.map((participant, index) => (
-              <div key={participant.id} className="relative rounded-xl overflow-hidden bg-gray-800">
-                {/* Remote Video */}
-                {index === 0 ? (
-                  <video
-                    ref={remoteVideoRef}
-                    autoPlay
-                    playsInline
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <div className="w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center text-4xl">
-                      {participant.avatar}
+            {/* Remote Video - always render for the first participant */}
+            <div className="relative rounded-xl overflow-hidden bg-gray-800">
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className="w-full h-full object-cover"
+              />
+              {call.participants[0] && (
+                <>
+                  <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/60 rounded-md text-xs text-white flex items-center gap-1.5">
+                    {call.participants[0].name}
+                    <div className="flex items-center gap-0.5">
+                      <Volume2 className="w-3 h-3 text-green-400" />
                     </div>
                   </div>
-                )}
-                <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/60 rounded-md text-xs text-white flex items-center gap-1.5">
-                  {participant.name}
-                  <div className="flex items-center gap-0.5">
-                    <Volume2 className="w-3 h-3 text-green-400" />
+                  {/* Simulated speaking indicator */}
+                  <div className="absolute top-3 right-3 flex gap-0.5">
+                    {[...Array(3)].map((_, i) => (
+                      <div
+                        key={i}
+                        className="w-1 bg-green-500 rounded-full animate-pulse"
+                        style={{
+                          height: `${8 + Math.random() * 12}px`,
+                          animationDelay: `${i * 0.15}s`,
+                        }}
+                      />
+                    ))}
                   </div>
-                </div>
-                {/* Simulated speaking indicator */}
-                <div className="absolute top-3 right-3 flex gap-0.5">
-                  {[...Array(3)].map((_, i) => (
-                    <div
-                      key={i}
-                      className="w-1 bg-green-500 rounded-full animate-pulse"
-                      style={{
-                        height: `${8 + Math.random() * 12}px`,
-                        animationDelay: `${i * 0.15}s`,
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
+                </>
+              )}
+            </div>
           </div>
         )}
 

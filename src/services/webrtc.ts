@@ -90,17 +90,34 @@ export class WebRTCManager {
 
     // Remote stream
     connection.ontrack = (event) => {
-      const [remoteStream] = event.streams;
-      if (remoteStream) {
-        // Check if it's a screen share track
-        const track = event.track;
-        if (track.kind === 'video' && track.label?.includes('screen')) {
-          this.config.onScreenTrack(remoteStream, peerId);
-        } else {
-          peerState.remoteStream = remoteStream;
-          this.config.onRemoteStream(remoteStream);
-        }
+      console.log('[WebRTC] ontrack event:', event.track.kind, event.track.label);
+      
+      const track = event.track;
+      
+      // Create or get remote stream
+      let remoteStream = peerState.remoteStream;
+      if (!remoteStream) {
+        remoteStream = new MediaStream();
+        peerState.remoteStream = remoteStream;
       }
+      
+      // Add track to stream
+      remoteStream.addTrack(track);
+      
+      // Check if it's a screen share track
+      if (track.kind === 'video' && track.label?.includes('screen')) {
+        console.log('[WebRTC] Screen track received');
+        this.config.onScreenTrack(remoteStream, peerId);
+      } else {
+        console.log('[WebRTC] Remote stream updated with track:', track.kind);
+        this.config.onRemoteStream(remoteStream);
+      }
+      
+      // Handle track end
+      track.onended = () => {
+        console.log('[WebRTC] Track ended:', track.kind);
+        remoteStream!.removeTrack(track);
+      };
     };
 
     // Negotiation needed (for adding tracks later)
