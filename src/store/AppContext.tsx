@@ -3,6 +3,7 @@ import { User, Chat, Message, CallState, VoiceRecording, WSConnectionStatus } fr
 import { WebSocketClient, getWebSocketClient, destroyWebSocketClient } from '../services/websocket';
 import { AudioRecorder, blobToBase64 } from '../services/audioRecorder';
 import { authService } from '../services/auth';
+import { apiService } from '../services/api';
 
 // Mock users
 const mockUsers: User[] = [
@@ -172,6 +173,7 @@ const initialState: AppState = {
 // Actions
 type Action =
   | { type: 'SET_ACTIVE_CHAT'; payload: string }
+  | { type: 'SET_CHATS'; payload: Chat[] }
   | { type: 'SEND_MESSAGE'; payload: { chatId: string; message: Message } }
   | { type: 'RECEIVE_MESSAGE'; payload: { chatId: string; message: Message } }
   | { type: 'START_CALL'; payload: { chatId: string; type: 'voice' | 'video'; isIncoming?: boolean; callerName?: string; callerAvatar?: string } }
@@ -192,6 +194,9 @@ function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_ACTIVE_CHAT':
       return { ...state, activeChatId: action.payload };
+
+    case 'SET_CHATS':
+      return { ...state, chats: action.payload };
 
     case 'SEND_MESSAGE': {
       const chatMessages = state.messages[action.payload.chatId] || [];
@@ -373,6 +378,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       destroyWebSocketClient();
     };
+  }, [state.currentUser.id]);
+
+  // Load chats from database
+  useEffect(() => {
+    const loadChats = async () => {
+      try {
+        const chatsWithDetails = await apiService.getUserChatsWithDetails();
+        
+        // Convert to app format
+        const chats: Chat[] = chatsWithDetails.map(chatDetail => {
+          const otherParticipant = chatDetail.participants.find(p => p.id !== state.currentUser.id);
+          const chatName = chatDetail.chat.type === 'private' && otherParticipant
+            ? otherParticipant.displayName
+            : chatDetail.chat.name || 'Чат';
+          
+          return {
+            id: chatDetail.chat.id,
+            type: chatDetail.chat.type,
+            name: chatName,
+            avatar: chatDetail.chat.type === 'private' && otherParticipant
+              ? otherParticipant.avatar
+              : chatDetail.chat.avatar || '💬',
+            participants: chatDetail.participants.map(p => ({
+              id: p.id,
+              name: p.displayName,
+              avatar: p.avatar,
+              status: p.status as any,
+            })),
+            unreadCount: chatDetail.unreadCount,
+            isOnline: otherParticipant?.status === 'online',
+          };
+        });
+
+        // Update state with real chats
+        dispatch({ type: 'SET_CHATS', payload: chats });
+
+        // Set first chat as active if no active chat
+        if (chats.length > 0 && !state.activeChatId) {
+          dispatch({ type: 'SET_ACTIVE_CHAT', payload: chats[0].id });
+        }
+      } catch (err) {
+        console.error('Failed to load chats:', err);
+      }
+    };
+
+    loadChats();
   }, [state.currentUser.id]);
 
   // Send text message

@@ -409,7 +409,12 @@ func main() {
 	api.Use(AuthMiddleware)
 	api.HandleFunc("/me", GetCurrentUserHandler).Methods("GET")
 	api.HandleFunc("/chats", GetUserChatsHandler).Methods("GET")
+	api.HandleFunc("/chats/details", GetUserChatsWithDetailsHandler).Methods("GET")
+	api.HandleFunc("/chats", CreateChatHandler).Methods("POST")
+	api.HandleFunc("/chats/{chatId}/read", MarkChatAsReadHandler).Methods("PUT")
 	api.HandleFunc("/messages/{chatId}", GetChatMessagesHandler).Methods("GET")
+	api.HandleFunc("/users", GetAllUsersHandler).Methods("GET")
+	api.HandleFunc("/users/search", SearchUsersHandler).Methods("GET")
 
 	// WebSocket (auth via query param for now)
 	router.HandleFunc("/ws/{userId}", handleWebSocket).Methods("GET")
