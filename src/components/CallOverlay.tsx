@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 export default function CallOverlay() {
-  const { state, dispatch } = useAppContext();
+  const { state, dispatch, acceptCall, rejectCall, endCall, toggleMute, toggleCamera, toggleScreenShare } = useAppContext();
   const { call, chats } = state;
   const [isFullscreen, setIsFullscreen] = useState(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -107,9 +107,9 @@ export default function CallOverlay() {
     stopScreenShare();
   };
 
-  const endCall = () => {
+  const handleEndCall = () => {
     cleanup();
-    dispatch({ type: 'END_CALL' });
+    endCall();
   };
 
   const formatDuration = (seconds: number) => {
@@ -140,14 +140,14 @@ export default function CallOverlay() {
           </p>
           <div className="flex items-center justify-center gap-8">
             <button
-              onClick={() => dispatch({ type: 'END_CALL' })}
+              onClick={rejectCall}
               className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition-all shadow-lg shadow-red-500/30"
               title="Отклонить"
             >
               <PhoneOff className="w-7 h-7" />
             </button>
             <button
-              onClick={() => dispatch({ type: 'UPDATE_CALL', payload: { isIncoming: false } })}
+              onClick={acceptCall}
               className="w-16 h-16 rounded-full bg-green-600 hover:bg-green-700 text-white flex items-center justify-center transition-all shadow-lg shadow-green-500/30"
               title="Принять"
             >
@@ -322,7 +322,7 @@ export default function CallOverlay() {
         <div className="flex items-center justify-center gap-4">
           {/* Mute */}
           <button
-            onClick={() => dispatch({ type: 'TOGGLE_MUTE' })}
+            onClick={toggleMute}
             className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
               call.isMuted
                 ? 'bg-red-500/20 text-red-400 border border-red-500/30'
@@ -336,7 +336,7 @@ export default function CallOverlay() {
           {/* Camera (video only) */}
           {call.type === 'video' && (
             <button
-              onClick={() => dispatch({ type: 'TOGGLE_CAMERA' })}
+              onClick={toggleCamera}
               className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
                 call.isCameraOff
                   ? 'bg-red-500/20 text-red-400 border border-red-500/30'
@@ -350,7 +350,7 @@ export default function CallOverlay() {
 
           {/* Screen Share */}
           <button
-            onClick={() => dispatch({ type: 'TOGGLE_SCREEN_SHARE' })}
+            onClick={toggleScreenShare}
             className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
               call.isScreenSharing
                 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
@@ -363,7 +363,7 @@ export default function CallOverlay() {
 
           {/* End Call */}
           <button
-            onClick={endCall}
+            onClick={handleEndCall}
             className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition-all shadow-lg shadow-red-500/30"
             title="Завершить звонок"
           >

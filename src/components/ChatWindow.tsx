@@ -87,19 +87,11 @@ export default function ChatWindow() {
     dispatch({ type: 'STOP_RECORDING' });
   };
 
-  const startCall = (type: 'voice' | 'video') => {
-    if (activeChatId && activeChat) {
-      const otherParticipant = activeChat.participants.find(p => p.id !== currentUser.id);
-      dispatch({
-        type: 'START_CALL',
-        payload: {
-          chatId: activeChatId,
-          type,
-          isIncoming: false,
-          callerName: currentUser.name,
-          callerAvatar: currentUser.avatar,
-        },
-      });
+  const { startCall } = useAppContext();
+
+  const handleStartCall = (type: 'voice' | 'video') => {
+    if (activeChatId) {
+      startCall(activeChatId, type);
     }
   };
 
@@ -155,7 +147,7 @@ export default function ChatWindow() {
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => startCall('voice')}
+            onClick={() => handleStartCall('voice')}
             disabled={call.isActive}
             className="p-2.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-green-400 transition-colors disabled:opacity-50"
             title="Голосовой звонок"
@@ -163,7 +155,7 @@ export default function ChatWindow() {
             <Phone className="w-5 h-5" />
           </button>
           <button
-            onClick={() => startCall('video')}
+            onClick={() => handleStartCall('video')}
             disabled={call.isActive}
             className="p-2.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-blue-400 transition-colors disabled:opacity-50"
             title="Видеозвонок"

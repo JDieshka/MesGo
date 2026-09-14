@@ -4,6 +4,7 @@ import { WebSocketClient, getWebSocketClient, destroyWebSocketClient } from '../
 import { AudioRecorder } from '../services/audioRecorder';
 import { authService } from '../services/auth';
 import { apiService } from '../services/api';
+import { CallManager } from '../services/callManager';
 
 // State
 interface AppState {
@@ -262,10 +263,18 @@ interface AppContextType {
   dispatch: React.Dispatch<Action>;
   wsClient: WebSocketClient | null;
   audioRecorder: AudioRecorder;
+  callManager: CallManager | null;
   sendMessage: (chatId: string, text: string) => void;
   sendVoiceMessage: (chatId: string, audioData: string, duration: number, waveform: number[]) => void;
   refreshChats: () => Promise<void>;
   refreshMessages: (chatId: string) => Promise<void>;
+  startCall: (chatId: string, type: 'voice' | 'video') => Promise<void>;
+  acceptCall: () => Promise<void>;
+  rejectCall: () => void;
+  endCall: () => void;
+  toggleMute: () => void;
+  toggleCamera: () => void;
+  toggleScreenShare: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -274,6 +283,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const wsClientRef = useRef<WebSocketClient | null>(null);
   const audioRecorderRef = useRef(new AudioRecorder());
+  const callManagerRef = useRef<CallManager | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -398,6 +408,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     });
 
+    // Initialize CallManager
+    callManagerRef.current = new CallManager(ws, (callState) => {
+      // Convert CallManager state to AppState format
+      dispatch({
+        type: 'UPDATE_CALL',
+        payload: {
+          isActive: callState.status !== 'idle' && callState.status !== 'ended',
+          type: callState.type,
+          chatId: callState.chatId || null,
+          isMuted: callState.isMuted,
+          isCameraOff: callState.isCameraOff,
+          isScreenSharing: callState.isScreenSharing,
+          duration: callState.duration,
+          isIncoming: callState.isIncoming,
+          callerName: callState.callerName,
+        },
+      });
+    });
+
     // Connect
     ws.connect();
 
@@ -475,6 +504,71 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'SEND_MESSAGE', payload: { chatId, message } });
   };
 
+  // Call management methods
+  const startCall = async (chatId: string, type: 'voice' | 'video') => {
+    if (!callManagerRef.current) return;
+
+    const chat = state.chats.find(c => c.id === chatId);
+    if (!chat) return;
+
+    const otherParticipant = chat.participants.find(p => p.id !== state.currentUser.id);
+    if (!otherParticipant) return;
+
+    dispatch({
+      type: 'START_CALL',
+      payload: {
+        chatId,
+        type,
+        isIncoming: false,
+        callerName: state.currentUser.name,
+        callerAvatar: state.currentUser.avatar,
+      },
+    });
+
+    await callManagerRef.current.initiateCall(
+      chatId,
+      chat.name,
+      chat.avatar,
+      otherParticipant.id,
+      type
+    );
+  };
+
+  const acceptCall = async () => {
+    if (!callManagerRef.current) return;
+    await callManagerRef.current.acceptCall();
+  };
+
+  const rejectCall = () => {
+    if (!callManagerRef.current) return;
+    callManagerRef.current.rejectCall();
+    dispatch({ type: 'END_CALL' });
+  };
+
+  const endCall = () => {
+    if (!callManagerRef.current) return;
+    callManagerRef.current.endCall();
+    dispatch({ type: 'END_CALL' });
+  };
+
+  const toggleMute = () => {
+    if (!callManagerRef.current) return;
+    callManagerRef.current.toggleMute();
+    dispatch({ type: 'TOGGLE_MUTE' });
+  };
+
+  const toggleCamera = () => {
+    if (!callManagerRef.current) return;
+    callManagerRef.current.toggleCamera();
+    dispatch({ type: 'TOGGLE_CAMERA' });
+  };
+
+  const toggleScreenShare = async () => {
+    if (!callManagerRef.current) return;
+    await callManagerRef.current.toggleScreenShare();
+    dispatch({ type: 'TOGGLE_SCREEN_SHARE' });
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -482,10 +576,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dispatch,
         wsClient: wsClientRef.current,
         audioRecorder: audioRecorderRef.current,
+        callManager: callManagerRef.current,
         sendMessage,
         sendVoiceMessage,
         refreshChats,
         refreshMessages,
+        startCall,
+        acceptCall,
+        rejectCall,
+        endCall,
+        toggleMute,
+        toggleCamera,
+        toggleScreenShare,
       }}
     >
       {children}
