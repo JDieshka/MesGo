@@ -17,6 +17,9 @@ RUN go mod tidy
 # Build the application
 RUN go build -o gotalk-server .
 
+# Create dist directory for frontend (will be mounted via docker-compose)
+RUN mkdir -p /app/dist
+
 # Expose port
 EXPOSE 8080
 

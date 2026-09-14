@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -414,7 +415,29 @@ func main() {
 	router.HandleFunc("/ws/{userId}", handleWebSocket).Methods("GET")
 
 	// Serve static files (frontend)
-	router.PathPrefix("/").Handler(http.FileServer(http.Dir("../dist")))
+	// Try multiple possible locations for the frontend build
+	frontendPaths := []string{
+		"./dist",      // Current directory
+		"../dist",     // Parent directory
+		"/app/dist",   // Docker absolute path
+		"./public",    // Alternative location
+	}
+	
+	var frontendPath string
+	for _, path := range frontendPaths {
+		if _, err := os.Stat(path); err == nil {
+			frontendPath = path
+			log.Printf("📁 Serving frontend from: %s", path)
+			break
+		}
+	}
+	
+	if frontendPath == "" {
+		log.Printf("⚠️  Frontend not found, API-only mode")
+		frontendPath = "./dist" // Default fallback
+	}
+	
+	router.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendPath)))
 
 	port := ":8080"
 	log.Printf("🚀 GoTalk server starting on port %s", port)
