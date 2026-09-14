@@ -195,16 +195,31 @@ export class WebRTCManager {
 
       // Replace video track in all peer connections
       const screenTrack = this.screenStream.getVideoTracks()[0];
+      
+      // Mark track as screen share
+      (screenTrack as any).isScreenShare = true;
 
       for (const [peerId, peer] of this.peers) {
         const sender = peer.connection.getSenders().find(s => s.track?.kind === 'video');
         if (sender) {
           await sender.replaceTrack(screenTrack);
+          console.log('[WebRTC] Replaced video track with screen share track for peer:', peerId);
+          
+          // CRITICAL: Need to renegotiate after replaceTrack so remote peer gets the new track
+          try {
+            const offer = await peer.connection.createOffer();
+            await peer.connection.setLocalDescription(offer);
+            this.config.onNegotiationNeeded(offer, peerId);
+            console.log('[WebRTC] Renegotiation initiated for screen share');
+          } catch (err) {
+            console.error('[WebRTC] Renegotiation failed:', err);
+          }
         }
       }
 
       // Handle screen share stop
       screenTrack.onended = () => {
+        console.log('[WebRTC] Screen share track ended');
         this.stopScreenShare();
       };
 
