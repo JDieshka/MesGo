@@ -66,14 +66,18 @@ export default function NewChatModal({ isOpen, onClose }: Props) {
         // Create group chat
         const result = await apiService.createGroupChat(groupName, selectedUsers);
         newChatId = result.chat.id;
+        console.log('[NewChatModal] Group chat created:', newChatId);
       } else {
         // Create private chat
         const result = await apiService.createPrivateChat(selectedUsers[0]);
         newChatId = result.chat.id;
+        console.log('[NewChatModal] Private chat created:', newChatId);
       }
 
       // Refresh chats list to show new chat
+      console.log('[NewChatModal] Refreshing chats...');
       await refreshChats();
+      console.log('[NewChatModal] Chats refreshed, setting active chat to:', newChatId);
 
       // Navigate to the new chat
       if (newChatId) {

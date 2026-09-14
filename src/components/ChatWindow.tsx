@@ -18,6 +18,12 @@ export default function ChatWindow() {
   const chatMessages = activeChatId ? messages[activeChatId] || [] : [];
 
   useEffect(() => {
+    console.log('[ChatWindow] Active chat ID:', activeChatId);
+    console.log('[ChatWindow] Active chat:', activeChat?.name);
+    console.log('[ChatWindow] All chats:', chats.map(c => ({ id: c.id, name: c.name })));
+  }, [activeChatId, chats]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 

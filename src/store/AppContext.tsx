@@ -82,9 +82,11 @@ type Action =
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_ACTIVE_CHAT':
+      console.log('[Reducer] SET_ACTIVE_CHAT:', action.payload, 'Previous:', state.activeChatId);
       return { ...state, activeChatId: action.payload };
 
     case 'SET_CHATS':
+      console.log('[Reducer] SET_CHATS:', action.payload.map(c => ({ id: c.id, name: c.name })));
       return { ...state, chats: action.payload };
 
     case 'ADD_CHAT': {
@@ -306,8 +308,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       dispatch({ type: 'SET_CHATS', payload: chats });
 
-      // Set first chat as active if no active chat
-      if (chats.length > 0 && !stateRef.current.activeChatId) {
+      // Set first chat as active ONLY if no active chat AND chats exist
+      // Don't override user's selection
+      const currentActiveId = stateRef.current.activeChatId;
+      if (chats.length > 0 && !currentActiveId) {
         dispatch({ type: 'SET_ACTIVE_CHAT', payload: chats[0].id });
       }
     } catch (err) {

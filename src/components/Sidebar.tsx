@@ -100,8 +100,10 @@ export default function Sidebar() {
             const lastMsg = getLastMessage(chat.id);
             return (
               <div
-                key={chat.id}
-                onClick={() => {
+                key={`private-${chat.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  console.log('[Sidebar] Clicked chat:', chat.id, chat.name);
                   dispatch({ type: 'SET_ACTIVE_CHAT', payload: chat.id });
                   dispatch({ type: 'MARK_AS_READ', payload: chat.id });
                 }}
@@ -154,8 +156,10 @@ export default function Sidebar() {
             const lastMsg = getLastMessage(chat.id);
             return (
               <div
-                key={chat.id}
-                onClick={() => {
+                key={`group-${chat.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  console.log('[Sidebar] Clicked group chat:', chat.id, chat.name);
                   dispatch({ type: 'SET_ACTIVE_CHAT', payload: chat.id });
                   dispatch({ type: 'MARK_AS_READ', payload: chat.id });
                 }}
