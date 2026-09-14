@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -81,12 +80,13 @@ func (h *Hub) Run() {
 			userRepo.UpdateUserStatus(client.UserID, "online")
 
 			// Broadcast status update to all clients
+			statusPayload, _ := json.Marshal(map[string]interface{}{
+				"userId": client.UserID,
+				"status": "online",
+			})
 			statusMsg, _ := json.Marshal(WSMessage{
-				Type: "user-status",
-				Payload: map[string]interface{}{
-					"userId": client.UserID,
-					"status": "online",
-				},
+				Type:    "user-status",
+				Payload: statusPayload,
 			})
 			h.BroadcastToAll(statusMsg, client.ID)
 
@@ -104,12 +104,13 @@ func (h *Hub) Run() {
 			userRepo.UpdateUserStatus(client.UserID, "offline")
 
 			// Broadcast status update
+			statusPayload, _ := json.Marshal(map[string]interface{}{
+				"userId": client.UserID,
+				"status": "offline",
+			})
 			statusMsg, _ := json.Marshal(WSMessage{
-				Type: "user-status",
-				Payload: map[string]interface{}{
-					"userId": client.UserID,
-					"status": "offline",
-				},
+				Type:    "user-status",
+				Payload: statusPayload,
 			})
 			h.BroadcastToAll(statusMsg, "")
 		}
@@ -306,12 +307,8 @@ func handleChatMessage(client *Client, payload json.RawMessage) {
 		return
 	}
 
-	// Update message with generated ID and timestamp
-	chatMsg.Message.ID = msg.ID.String()
-	chatMsg.Message.SenderID = client.UserID.String()
-	chatMsg.Message.Timestamp = msg.CreatedAt
-
 	// Broadcast to chat participants
+	// Use the original payload which already contains all message data
 	response, _ := json.Marshal(WSMessage{
 		Type:    "chat-message",
 		Payload: payload,
