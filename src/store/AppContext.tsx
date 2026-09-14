@@ -1,5 +1,7 @@
-import React, { createContext, useContext, useReducer, ReactNode } from 'react';
-import { User, Chat, Message, CallState, VoiceRecording } from '../types';
+import React, { createContext, useContext, useReducer, ReactNode, useEffect, useRef } from 'react';
+import { User, Chat, Message, CallState, VoiceRecording, WSConnectionStatus } from '../types';
+import { WebSocketClient, getWebSocketClient, destroyWebSocketClient } from '../services/websocket';
+import { AudioRecorder, blobToBase64 } from '../services/audioRecorder';
 
 // Mock users
 const mockUsers: User[] = [
@@ -124,6 +126,7 @@ interface AppState {
   call: CallState;
   voiceRecording: VoiceRecording;
   sidebarOpen: boolean;
+  wsStatus: WSConnectionStatus;
 }
 
 const initialState: AppState = {
@@ -141,32 +144,43 @@ const initialState: AppState = {
     isMuted: false,
     isCameraOff: false,
     duration: 0,
+    isIncoming: false,
+    callerName: '',
+    callerAvatar: '',
   },
   voiceRecording: {
     isRecording: false,
     duration: 0,
+    waveform: [],
   },
   sidebarOpen: true,
+  wsStatus: { status: 'disconnected' },
 };
 
 // Actions
 type Action =
   | { type: 'SET_ACTIVE_CHAT'; payload: string }
   | { type: 'SEND_MESSAGE'; payload: { chatId: string; message: Message } }
-  | { type: 'START_CALL'; payload: { chatId: string; type: 'voice' | 'video' } }
+  | { type: 'RECEIVE_MESSAGE'; payload: { chatId: string; message: Message } }
+  | { type: 'START_CALL'; payload: { chatId: string; type: 'voice' | 'video'; isIncoming?: boolean; callerName?: string; callerAvatar?: string } }
+  | { type: 'UPDATE_CALL'; payload: Partial<CallState> }
   | { type: 'END_CALL' }
   | { type: 'TOGGLE_MUTE' }
   | { type: 'TOGGLE_CAMERA' }
   | { type: 'TOGGLE_SCREEN_SHARE' }
   | { type: 'START_RECORDING' }
+  | { type: 'UPDATE_RECORDING'; payload: { duration: number; waveform: number[] } }
   | { type: 'STOP_RECORDING' }
   | { type: 'TOGGLE_SIDEBAR' }
-  | { type: 'MARK_AS_READ'; payload: string };
+  | { type: 'MARK_AS_READ'; payload: string }
+  | { type: 'SET_WS_STATUS'; payload: WSConnectionStatus }
+  | { type: 'UPDATE_USER_STATUS'; payload: { userId: string; status: 'online' | 'offline' | 'busy' | 'away' } };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_ACTIVE_CHAT':
       return { ...state, activeChatId: action.payload };
+
     case 'SEND_MESSAGE': {
       const chatMessages = state.messages[action.payload.chatId] || [];
       return {
@@ -177,45 +191,107 @@ function reducer(state: AppState, action: Action): AppState {
         },
       };
     }
-    case 'START_CALL': {
-      const chat = state.chats.find(c => c.id === action.payload.chatId);
+
+    case 'RECEIVE_MESSAGE': {
+      const chatMessages = state.messages[action.payload.chatId] || [];
+      const updatedChats = state.chats.map(c => {
+        if (c.id === action.payload.chatId && c.id !== state.activeChatId) {
+          return { ...c, unreadCount: c.unreadCount + 1, lastMessage: action.payload.message };
+        }
+        if (c.id === action.payload.chatId) {
+          return { ...c, lastMessage: action.payload.message };
+        }
+        return c;
+      });
+      return {
+        ...state,
+        chats: updatedChats,
+        messages: {
+          ...state.messages,
+          [action.payload.chatId]: [...chatMessages, action.payload.message],
+        },
+      };
+    }
+
+    case 'START_CALL':
       return {
         ...state,
         call: {
           isActive: true,
           type: action.payload.type,
           chatId: action.payload.chatId,
-          participants: chat?.participants.filter(p => p.id !== state.currentUser.id) || [],
+          participants: [],
           isScreenSharing: false,
           isMuted: false,
           isCameraOff: false,
           duration: 0,
+          isIncoming: action.payload.isIncoming || false,
+          callerName: action.payload.callerName || '',
+          callerAvatar: action.payload.callerAvatar || '',
         },
       };
-    }
+
+    case 'UPDATE_CALL':
+      return { ...state, call: { ...state.call, ...action.payload } };
+
     case 'END_CALL':
       return {
         ...state,
         call: { ...initialState.call },
       };
+
     case 'TOGGLE_MUTE':
       return { ...state, call: { ...state.call, isMuted: !state.call.isMuted } };
+
     case 'TOGGLE_CAMERA':
       return { ...state, call: { ...state.call, isCameraOff: !state.call.isCameraOff } };
+
     case 'TOGGLE_SCREEN_SHARE':
       return { ...state, call: { ...state.call, isScreenSharing: !state.call.isScreenSharing } };
+
     case 'START_RECORDING':
-      return { ...state, voiceRecording: { isRecording: true, duration: 0 } };
+      return { ...state, voiceRecording: { isRecording: true, duration: 0, waveform: [] } };
+
+    case 'UPDATE_RECORDING':
+      return {
+        ...state,
+        voiceRecording: {
+          ...state.voiceRecording,
+          duration: action.payload.duration,
+          waveform: action.payload.waveform,
+        },
+      };
+
     case 'STOP_RECORDING':
-      return { ...state, voiceRecording: { isRecording: false, duration: 0 } };
+      return { ...state, voiceRecording: { isRecording: false, duration: 0, waveform: [] } };
+
     case 'TOGGLE_SIDEBAR':
       return { ...state, sidebarOpen: !state.sidebarOpen };
+
     case 'MARK_AS_READ': {
       const updatedChats = state.chats.map(c =>
         c.id === action.payload ? { ...c, unreadCount: 0 } : c
       );
       return { ...state, chats: updatedChats };
     }
+
+    case 'SET_WS_STATUS':
+      return { ...state, wsStatus: action.payload };
+
+    case 'UPDATE_USER_STATUS': {
+      const updatedUsers = state.users.map(u =>
+        u.id === action.payload.userId ? { ...u, status: action.payload.status } : u
+      );
+      const updatedChats = state.chats.map(c => {
+        const participant = c.participants.find(p => p.id === action.payload.userId);
+        if (participant) {
+          return { ...c, isOnline: action.payload.status === 'online' };
+        }
+        return c;
+      });
+      return { ...state, users: updatedUsers, chats: updatedChats };
+    }
+
     default:
       return state;
   }
@@ -225,14 +301,139 @@ function reducer(state: AppState, action: Action): AppState {
 interface AppContextType {
   state: AppState;
   dispatch: React.Dispatch<Action>;
+  wsClient: WebSocketClient | null;
+  audioRecorder: AudioRecorder;
+  sendMessage: (chatId: string, text: string) => void;
+  sendVoiceMessage: (chatId: string, audioData: string, duration: number, waveform: number[]) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const wsClientRef = useRef<WebSocketClient | null>(null);
+  const audioRecorderRef = useRef(new AudioRecorder());
+
+  // Initialize WebSocket connection
+  useEffect(() => {
+    const ws = getWebSocketClient(state.currentUser.id);
+    wsClientRef.current = ws;
+
+    // Listen for connection status
+    ws.onStatus((status) => {
+      dispatch({ type: 'SET_WS_STATUS', payload: { status } });
+    });
+
+    // Listen for incoming messages
+    ws.on('chat-message', (payload: any) => {
+      const message: Message = {
+        id: payload.message.id || `m${Date.now()}`,
+        chatId: payload.chatId,
+        senderId: payload.message.senderId,
+        text: payload.message.text,
+        timestamp: new Date(payload.message.timestamp || Date.now()),
+        type: payload.message.type || 'text',
+        voiceDuration: payload.message.voiceDuration,
+        audioData: payload.message.audioData,
+        waveform: payload.message.waveform,
+        isRead: false,
+      };
+      dispatch({ type: 'RECEIVE_MESSAGE', payload: { chatId: payload.chatId, message } });
+    });
+
+    // Listen for typing indicators
+    ws.on('typing', (payload: any) => {
+      // Could show typing indicator in UI
+      console.log('[WS] User typing:', payload.userId, 'in chat:', payload.chatId);
+    });
+
+    // Listen for user status updates
+    ws.on('user-status', (payload: any) => {
+      dispatch({
+        type: 'UPDATE_USER_STATUS',
+        payload: { userId: payload.userId, status: payload.status },
+      });
+    });
+
+    // Connect
+    ws.connect();
+
+    return () => {
+      destroyWebSocketClient();
+    };
+  }, [state.currentUser.id]);
+
+  // Send text message
+  const sendMessage = (chatId: string, text: string) => {
+    const message: Message = {
+      id: `m${Date.now()}`,
+      chatId,
+      senderId: state.currentUser.id,
+      text,
+      timestamp: new Date(),
+      type: 'text',
+      isRead: false,
+    };
+
+    // Send via WebSocket
+    if (wsClientRef.current?.isConnected()) {
+      wsClientRef.current.send('chat-message', {
+        chatId,
+        message: {
+          text,
+          type: 'text',
+        },
+      });
+    }
+
+    // Update local state
+    dispatch({ type: 'SEND_MESSAGE', payload: { chatId, message } });
+  };
+
+  // Send voice message
+  const sendVoiceMessage = async (chatId: string, audioData: string, duration: number, waveform: number[]) => {
+    const message: Message = {
+      id: `m${Date.now()}`,
+      chatId,
+      senderId: state.currentUser.id,
+      text: '🎤 Голосовое сообщение',
+      timestamp: new Date(),
+      type: 'voice',
+      voiceDuration: duration,
+      audioData,
+      waveform,
+      isRead: false,
+    };
+
+    // Send via WebSocket
+    if (wsClientRef.current?.isConnected()) {
+      wsClientRef.current.send('chat-message', {
+        chatId,
+        message: {
+          text: '🎤 Голосовое сообщение',
+          type: 'voice',
+          voiceDuration: duration,
+          audioData,
+          waveform,
+        },
+      });
+    }
+
+    // Update local state
+    dispatch({ type: 'SEND_MESSAGE', payload: { chatId, message } });
+  };
+
   return (
-    <AppContext.Provider value={{ state, dispatch }}>
+    <AppContext.Provider
+      value={{
+        state,
+        dispatch,
+        wsClient: wsClientRef.current,
+        audioRecorder: audioRecorderRef.current,
+        sendMessage,
+        sendVoiceMessage,
+      }}
+    >
       {children}
     </AppContext.Provider>
   );

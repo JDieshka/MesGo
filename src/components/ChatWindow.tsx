@@ -2,17 +2,17 @@ import { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '../store/AppContext';
 import {
   Phone, Video, MoreVertical, Send, Mic, MicOff, Paperclip, Smile,
-  ChevronLeft
+  ChevronLeft, X
 } from 'lucide-react';
 import MessageBubble from './MessageBubble';
+import { blobToBase64 } from '../services/audioRecorder';
 
 export default function ChatWindow() {
-  const { state, dispatch } = useAppContext();
-  const { activeChatId, messages, chats, currentUser, voiceRecording, call } = state;
+  const { state, dispatch, audioRecorder, sendMessage, sendVoiceMessage } = useAppContext();
+  const { activeChatId, messages, chats, currentUser, voiceRecording, call, wsStatus } = state;
   const [inputText, setInputText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const recordingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const activeChat = chats.find(c => c.id === activeChatId);
   const chatMessages = activeChatId ? messages[activeChatId] || [] : [];
@@ -23,16 +23,7 @@ export default function ChatWindow() {
 
   const handleSend = () => {
     if (!inputText.trim() || !activeChatId) return;
-    const newMessage = {
-      id: `m${Date.now()}`,
-      chatId: activeChatId,
-      senderId: currentUser.id,
-      text: inputText.trim(),
-      timestamp: new Date(),
-      type: 'text' as const,
-      isRead: false,
-    };
-    dispatch({ type: 'SEND_MESSAGE', payload: { chatId: activeChatId, message: newMessage } });
+    sendMessage(activeChatId, inputText.trim());
     setInputText('');
   };
 
@@ -43,36 +34,66 @@ export default function ChatWindow() {
     }
   };
 
-  const startRecording = () => {
+  const startRecording = async () => {
+    if (!activeChatId) return;
+
     dispatch({ type: 'START_RECORDING' });
-    recordingInterval.current = setInterval(() => {
-      // Recording timer
-    }, 1000);
+
+    try {
+      await audioRecorder.start(
+        (duration) => {
+          dispatch({
+            type: 'UPDATE_RECORDING',
+            payload: { duration, waveform: state.voiceRecording.waveform },
+          });
+        },
+        (waveform) => {
+          dispatch({
+            type: 'UPDATE_RECORDING',
+            payload: { duration: state.voiceRecording.duration, waveform },
+          });
+        }
+      );
+    } catch (err) {
+      console.error('Failed to start recording:', err);
+      dispatch({ type: 'STOP_RECORDING' });
+    }
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
+    if (!activeChatId) return;
+
+    try {
+      const result = await audioRecorder.stop();
+      if (result) {
+        const audioData = await blobToBase64(result.blob);
+        await sendVoiceMessage(activeChatId, audioData, result.duration, result.waveform);
+      }
+    } catch (err) {
+      console.error('Failed to stop recording:', err);
+    }
+
     dispatch({ type: 'STOP_RECORDING' });
-    if (recordingInterval.current) {
-      clearInterval(recordingInterval.current);
-    }
-    if (activeChatId) {
-      const newMessage = {
-        id: `m${Date.now()}`,
-        chatId: activeChatId,
-        senderId: currentUser.id,
-        text: '🎤 Голосовое сообщение',
-        timestamp: new Date(),
-        type: 'voice' as const,
-        voiceDuration: Math.floor(Math.random() * 30) + 5,
-        isRead: false,
-      };
-      dispatch({ type: 'SEND_MESSAGE', payload: { chatId: activeChatId, message: newMessage } });
-    }
+  };
+
+  const cancelRecording = () => {
+    audioRecorder.cancel();
+    dispatch({ type: 'STOP_RECORDING' });
   };
 
   const startCall = (type: 'voice' | 'video') => {
-    if (activeChatId) {
-      dispatch({ type: 'START_CALL', payload: { chatId: activeChatId, type } });
+    if (activeChatId && activeChat) {
+      const otherParticipant = activeChat.participants.find(p => p.id !== currentUser.id);
+      dispatch({
+        type: 'START_CALL',
+        payload: {
+          chatId: activeChatId,
+          type,
+          isIncoming: false,
+          callerName: currentUser.name,
+          callerAvatar: currentUser.avatar,
+        },
+      });
     }
   };
 
@@ -111,12 +132,18 @@ export default function ChatWindow() {
           </div>
           <div>
             <h3 className="text-sm font-medium text-white">{activeChat.name}</h3>
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-gray-400 flex items-center gap-2">
               {activeChat.type === 'group'
                 ? `${activeChat.participants.length} участников`
                 : activeChat.isOnline
                 ? 'В сети'
                 : 'Не в сети'}
+              {/* WS Status indicator */}
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                wsStatus.status === 'connected' ? 'bg-green-500' :
+                wsStatus.status === 'connecting' ? 'bg-yellow-500 animate-pulse' :
+                'bg-red-500'
+              }`} title={`WS: ${wsStatus.status}`}></span>
             </p>
           </div>
         </div>
@@ -173,21 +200,47 @@ export default function ChatWindow() {
       {/* Input Area */}
       <div className="border-t border-gray-800 p-4 bg-gray-900/30">
         {voiceRecording.isRecording && (
-          <div className="mb-3 flex items-center gap-3 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3">
-            <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
-            <span className="text-sm text-red-400">Запись голосового сообщения...</span>
-            <button
-              onClick={stopRecording}
-              className="ml-auto px-3 py-1 bg-red-500 text-white text-sm rounded-lg hover:bg-red-600 transition-colors"
-            >
-              Отправить
-            </button>
-            <button
-              onClick={() => dispatch({ type: 'STOP_RECORDING' })}
-              className="px-3 py-1 bg-gray-700 text-gray-300 text-sm rounded-lg hover:bg-gray-600 transition-colors"
-            >
-              Отмена
-            </button>
+          <div className="mb-3 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
+              <span className="text-sm text-red-400">Запись... {voiceRecording.duration}с</span>
+              <div className="ml-auto flex gap-2">
+                <button
+                  onClick={cancelRecording}
+                  className="px-3 py-1 bg-gray-700 text-gray-300 text-sm rounded-lg hover:bg-gray-600 transition-colors flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" />
+                  Отмена
+                </button>
+                <button
+                  onClick={stopRecording}
+                  className="px-3 py-1 bg-red-500 text-white text-sm rounded-lg hover:bg-red-600 transition-colors flex items-center gap-1"
+                >
+                  <Send className="w-3 h-3" />
+                  Отправить
+                </button>
+              </div>
+            </div>
+            {/* Waveform visualization */}
+            <div className="flex items-center gap-0.5 h-8">
+              {voiceRecording.waveform.length > 0 ? (
+                voiceRecording.waveform.slice(0, 40).map((value, i) => (
+                  <div
+                    key={i}
+                    className="w-1 bg-red-400 rounded-full transition-all"
+                    style={{ height: `${Math.max(value * 24, 3)}px` }}
+                  />
+                ))
+              ) : (
+                Array.from({ length: 20 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="w-1 bg-red-400/50 rounded-full animate-pulse"
+                    style={{ height: `${Math.random() * 16 + 4}px`, animationDelay: `${i * 0.05}s` }}
+                  />
+                ))
+              )}
+            </div>
           </div>
         )}
 
@@ -206,7 +259,7 @@ export default function ChatWindow() {
               style={{ minHeight: '44px', maxHeight: '120px' }}
             />
             {showEmoji && (
-              <div className="absolute bottom-full mb-2 left-0 bg-gray-800 border border-gray-700 rounded-xl p-3 shadow-xl">
+              <div className="absolute bottom-full mb-2 left-0 bg-gray-800 border border-gray-700 rounded-xl p-3 shadow-xl z-10">
                 <div className="grid grid-cols-8 gap-1">
                   {emojis.map((emoji) => (
                     <button
@@ -242,7 +295,7 @@ export default function ChatWindow() {
               onClick={voiceRecording.isRecording ? stopRecording : startRecording}
               className={`p-2.5 rounded-lg transition-colors ${
                 voiceRecording.isRecording
-                  ? 'bg-red-600 hover:bg-red-700 text-white'
+                  ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'
                   : 'hover:bg-gray-800 text-gray-400'
               }`}
             >

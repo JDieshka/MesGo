@@ -22,13 +22,15 @@ type User struct {
 }
 
 type Message struct {
-	ID        string    `json:"id"`
-	ChatID    string    `json:"chatId"`
-	SenderID  string    `json:"senderId"`
-	Text      string    `json:"text"`
-	Timestamp time.Time `json:"timestamp"`
-	Type      string    `json:"type"` // text, voice, system
-	VoiceDuration int   `json:"voiceDuration,omitempty"`
+	ID            string    `json:"id"`
+	ChatID        string    `json:"chatId"`
+	SenderID      string    `json:"senderId"`
+	Text          string    `json:"text"`
+	Timestamp     time.Time `json:"timestamp"`
+	Type          string    `json:"type"` // text, voice, system
+	VoiceDuration int       `json:"voiceDuration,omitempty"`
+	AudioData     string    `json:"audioData,omitempty"` // base64 encoded audio
+	Waveform      []float64 `json:"waveform,omitempty"`  // waveform visualization data
 }
 
 type Chat struct {
@@ -275,16 +277,19 @@ func handleChatMessage(client *Client, payload json.RawMessage) {
 	chatMsg.Message.SenderID = client.ID
 	chatMsg.Message.Timestamp = time.Now()
 
-	// Save to store
-	store.Save(chatMsg.Message)
+	// Save to store (without audio data to save memory)
+	msgToSave := chatMsg.Message
+	msgToSave.AudioData = "" // Don't store audio in memory
+	store.Save(msgToSave)
 
-	// Broadcast to chat participants
+	// Broadcast to chat participants with full payload (including audio)
 	response, _ := json.Marshal(WSMessage{
 		Type:    "chat-message",
 		Payload: payload,
 	})
 
 	hub.BroadcastToChat(chatMsg.ChatID, response, "")
+	log.Printf("Message sent in chat %s by %s (type: %s)", chatMsg.ChatID, client.ID, chatMsg.Message.Type)
 }
 
 func handleTyping(client *Client, payload json.RawMessage) {

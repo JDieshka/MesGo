@@ -2,42 +2,51 @@ import { useEffect, useRef, useState } from 'react';
 import { useAppContext } from '../store/AppContext';
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff, Monitor, MonitorOff,
-  Users, Maximize2, Minimize2, Volume2
+  Users, Maximize2, Minimize2, Volume2, Phone
 } from 'lucide-react';
 
 export default function CallOverlay() {
   const { state, dispatch } = useAppContext();
   const { call, chats } = state;
-  const [elapsed, setElapsed] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
   const screenRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
 
   const activeChat = call.chatId ? chats.find(c => c.id === call.chatId) : null;
 
+  // Setup local video when call starts
   useEffect(() => {
     if (!call.isActive) {
-      setElapsed(0);
+      cleanup();
       return;
     }
-    const interval = setInterval(() => {
-      setElapsed(prev => prev + 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [call.isActive]);
 
-  useEffect(() => {
-    if (call.isActive && call.type === 'video' && !call.isCameraOff) {
+    if (call.type === 'video' && !call.isCameraOff) {
       startCamera();
     }
-    return () => {
-      stopCamera();
-    };
-  }, [call.isActive, call.type, call.isCameraOff]);
 
+    return () => {
+      // Don't cleanup on unmount, only on call end
+    };
+  }, [call.isActive, call.type]);
+
+  // Handle camera toggle
   useEffect(() => {
+    if (!call.isActive || call.type !== 'video') return;
+
+    if (call.isCameraOff) {
+      stopCamera();
+    } else {
+      startCamera();
+    }
+  }, [call.isCameraOff]);
+
+  // Handle screen share
+  useEffect(() => {
+    if (!call.isActive) return;
+
     if (call.isScreenSharing) {
       startScreenShare();
     } else {
@@ -47,10 +56,13 @@ export default function CallOverlay() {
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 1280, height: 720 },
+        audio: true,
+      });
       localStreamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
       }
     } catch (err) {
       console.log('Camera access denied or not available');
@@ -90,9 +102,13 @@ export default function CallOverlay() {
     }
   };
 
-  const endCall = () => {
+  const cleanup = () => {
     stopCamera();
     stopScreenShare();
+  };
+
+  const endCall = () => {
+    cleanup();
     dispatch({ type: 'END_CALL' });
   };
 
@@ -105,6 +121,43 @@ export default function CallOverlay() {
     }
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
+
+  // Incoming call UI
+  if (call.isActive && call.isIncoming && call.duration === 0) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/95 backdrop-blur-xl">
+        <div className="text-center">
+          <div className="relative w-32 h-32 mx-auto mb-8">
+            <div className="absolute inset-0 rounded-full bg-gradient-to-br from-green-500 to-blue-600 animate-ping opacity-20"></div>
+            <div className="absolute inset-2 rounded-full bg-gradient-to-br from-green-500 to-blue-600 animate-pulse opacity-40"></div>
+            <div className="relative w-full h-full rounded-full bg-gradient-to-br from-green-500 to-blue-600 flex items-center justify-center text-6xl shadow-2xl shadow-green-500/30">
+              {call.callerAvatar || '👤'}
+            </div>
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">{call.callerName || 'Входящий звонок'}</h2>
+          <p className="text-gray-400 mb-8">
+            {call.type === 'video' ? '📹 Видеозвонок' : '📞 Голосовой звонок'}
+          </p>
+          <div className="flex items-center justify-center gap-8">
+            <button
+              onClick={() => dispatch({ type: 'END_CALL' })}
+              className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition-all shadow-lg shadow-red-500/30"
+              title="Отклонить"
+            >
+              <PhoneOff className="w-7 h-7" />
+            </button>
+            <button
+              onClick={() => dispatch({ type: 'UPDATE_CALL', payload: { isIncoming: false } })}
+              className="w-16 h-16 rounded-full bg-green-600 hover:bg-green-700 text-white flex items-center justify-center transition-all shadow-lg shadow-green-500/30"
+              title="Принять"
+            >
+              <Phone className="w-7 h-7" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!call.isActive) return null;
 
@@ -120,7 +173,7 @@ export default function CallOverlay() {
             <h3 className="text-sm font-medium text-white">{activeChat?.name || 'Звонок'}</h3>
             <p className="text-xs text-green-400 flex items-center gap-1">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-              {formatDuration(elapsed)}
+              {formatDuration(call.duration)}
             </p>
           </div>
         </div>
@@ -180,7 +233,7 @@ export default function CallOverlay() {
                 </div>
               ) : (
                 <video
-                  ref={videoRef}
+                  ref={localVideoRef}
                   autoPlay
                   playsInline
                   muted
@@ -231,7 +284,7 @@ export default function CallOverlay() {
               {activeChat?.avatar || '👤'}
             </div>
             <h2 className="text-2xl font-bold text-white mb-2">{activeChat?.name}</h2>
-            <p className="text-gray-400">{formatDuration(elapsed)}</p>
+            <p className="text-gray-400">{formatDuration(call.duration)}</p>
             {activeChat?.type === 'group' && (
               <div className="mt-6 flex justify-center gap-3">
                 {call.participants.map((p) => (
@@ -251,7 +304,7 @@ export default function CallOverlay() {
         {call.isScreenSharing && call.type === 'video' && (
           <div className="absolute bottom-24 right-4 w-48 h-32 rounded-xl overflow-hidden border-2 border-gray-700 shadow-xl bg-gray-800">
             <video
-              ref={videoRef}
+              ref={localVideoRef}
               autoPlay
               playsInline
               muted

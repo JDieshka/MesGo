@@ -44,9 +44,17 @@ export default function Sidebar() {
             >
               <Plus className="w-5 h-5" />
             </button>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full bg-green-500"></div>
-              <span className="text-xs text-gray-400">Online</span>
+            <div className="flex items-center gap-1.5" title={`WebSocket: ${state.wsStatus.status}`}>
+              <div className={`w-2 h-2 rounded-full ${
+                state.wsStatus.status === 'connected' ? 'bg-green-500' :
+                state.wsStatus.status === 'connecting' ? 'bg-yellow-500 animate-pulse' :
+                'bg-red-500'
+              }`}></div>
+              <span className="text-xs text-gray-400">
+                {state.wsStatus.status === 'connected' ? 'Online' :
+                 state.wsStatus.status === 'connecting' ? 'Connecting...' :
+                 'Offline'}
+              </span>
             </div>
           </div>
         </div>

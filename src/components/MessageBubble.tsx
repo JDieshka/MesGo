@@ -1,6 +1,7 @@
 import { Play, Pause } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Message } from '../types';
+import { base64ToBlob } from '../services/audioRecorder';
 
 interface MessageBubbleProps {
   message: Message;
@@ -13,6 +14,23 @@ interface MessageBubbleProps {
 export default function MessageBubble({ message, isOwn, senderName, senderAvatar, isGroup }: MessageBubbleProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playProgress, setPlayProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+
+  // Create audio URL from base64 data
+  useEffect(() => {
+    if (message.type === 'voice' && message.audioData) {
+      const blob = base64ToBlob(message.audioData);
+      audioUrlRef.current = URL.createObjectURL(blob);
+
+      return () => {
+        if (audioUrlRef.current) {
+          URL.revokeObjectURL(audioUrlRef.current);
+        }
+      };
+    }
+  }, [message.audioData]);
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
@@ -20,29 +38,63 @@ export default function MessageBubble({ message, isOwn, senderName, senderAvatar
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+    const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const togglePlay = () => {
+    if (!audioUrlRef.current) {
+      // Simulate playback for demo messages without audio data
+      if (isPlaying) {
+        setIsPlaying(false);
+        setPlayProgress(0);
+        setCurrentTime(0);
+      } else {
+        setIsPlaying(true);
+        const duration = (message.voiceDuration || 10) * 100;
+        const interval = setInterval(() => {
+          setPlayProgress(prev => {
+            if (prev >= 100) {
+              clearInterval(interval);
+              setIsPlaying(false);
+              setCurrentTime(0);
+              return 0;
+            }
+            setCurrentTime((prev / 100) * (message.voiceDuration || 10));
+            return prev + 1;
+          });
+        }, duration / 100);
+      }
+      return;
+    }
+
+    // Real audio playback
     if (isPlaying) {
+      audioRef.current?.pause();
       setIsPlaying(false);
-      setPlayProgress(0);
     } else {
-      setIsPlaying(true);
-      const duration = (message.voiceDuration || 10) * 100;
-      const interval = setInterval(() => {
-        setPlayProgress(prev => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            setIsPlaying(false);
-            return 0;
+      if (!audioRef.current) {
+        audioRef.current = new Audio(audioUrlRef.current);
+        audioRef.current.onended = () => {
+          setIsPlaying(false);
+          setPlayProgress(0);
+          setCurrentTime(0);
+        };
+        audioRef.current.ontimeupdate = () => {
+          if (audioRef.current) {
+            const progress = (audioRef.current.currentTime / audioRef.current.duration) * 100;
+            setPlayProgress(progress);
+            setCurrentTime(audioRef.current.currentTime);
           }
-          return prev + 1;
-        });
-      }, duration / 100);
+        };
+      }
+      audioRef.current.play();
+      setIsPlaying(true);
     }
   };
+
+  // Get waveform data or generate fake one
+  const waveform = message.waveform || Array.from({ length: 30 }, () => Math.random() * 0.8 + 0.2);
 
   if (message.type === 'voice') {
     return (
@@ -77,21 +129,24 @@ export default function MessageBubble({ message, isOwn, senderName, senderAvatar
                 </button>
                 <div className="flex-1">
                   <div className="flex items-center gap-0.5 h-6">
-                    {Array.from({ length: 20 }).map((_, i) => (
-                      <div
-                        key={i}
-                        className={`w-1 rounded-full transition-colors ${
-                          i <= (playProgress / 5)
-                            ? isOwn ? 'bg-white' : 'bg-blue-400'
-                            : isOwn ? 'bg-blue-400/50' : 'bg-gray-600'
-                        }`}
-                        style={{ height: `${Math.random() * 16 + 6}px` }}
-                      />
-                    ))}
+                    {waveform.map((value, i) => {
+                      const played = i <= (playProgress / 100) * waveform.length;
+                      return (
+                        <div
+                          key={i}
+                          className={`w-1 rounded-full transition-colors ${
+                            played
+                              ? isOwn ? 'bg-white' : 'bg-blue-400'
+                              : isOwn ? 'bg-blue-400/50' : 'bg-gray-600'
+                          }`}
+                          style={{ height: `${value * 20 + 4}px` }}
+                        />
+                      );
+                    })}
                   </div>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-xs opacity-70">
-                      {isPlaying ? formatDuration(Math.floor((playProgress / 100) * (message.voiceDuration || 10))) : '0:00'}
+                      {formatDuration(currentTime)}
                     </span>
                     <span className="text-xs opacity-70">
                       {formatDuration(message.voiceDuration || 10)}
@@ -102,6 +157,7 @@ export default function MessageBubble({ message, isOwn, senderName, senderAvatar
             </div>
             <span className={`text-[10px] text-gray-500 mt-1 block ${isOwn ? 'text-right' : 'text-left'}`}>
               {formatTime(message.timestamp)}
+              {isOwn && message.isRead && ' ✓✓'}
             </span>
           </div>
         </div>

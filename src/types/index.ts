@@ -14,6 +14,8 @@ export interface Message {
   timestamp: Date;
   type: 'text' | 'voice' | 'system';
   voiceDuration?: number; // seconds
+  audioData?: string; // base64 encoded audio
+  waveform?: number[]; // waveform visualization data
   isRead: boolean;
 }
 
@@ -37,9 +39,18 @@ export interface CallState {
   isMuted: boolean;
   isCameraOff: boolean;
   duration: number;
+  isIncoming: boolean;
+  callerName: string;
+  callerAvatar: string;
 }
 
 export interface VoiceRecording {
   isRecording: boolean;
   duration: number;
+  waveform: number[];
+}
+
+export interface WSConnectionStatus {
+  status: 'connecting' | 'connected' | 'disconnected' | 'error';
+  lastError?: string;
 }
