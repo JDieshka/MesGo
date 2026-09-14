@@ -1,122 +1,9 @@
-import React, { createContext, useContext, useReducer, ReactNode, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useReducer, ReactNode, useEffect, useRef, useCallback } from 'react';
 import { User, Chat, Message, CallState, VoiceRecording, WSConnectionStatus } from '../types';
 import { WebSocketClient, getWebSocketClient, destroyWebSocketClient } from '../services/websocket';
-import { AudioRecorder, blobToBase64 } from '../services/audioRecorder';
+import { AudioRecorder } from '../services/audioRecorder';
 import { authService } from '../services/auth';
 import { apiService } from '../services/api';
-
-// Mock users
-const mockUsers: User[] = [
-  { id: '1', name: 'Вы', avatar: '👤', status: 'online' },
-  { id: '2', name: 'Алексей Петров', avatar: '👨‍💻', status: 'online' },
-  { id: '3', name: 'Мария Иванова', avatar: '👩‍🎨', status: 'online' },
-  { id: '4', name: 'Дмитрий Козлов', avatar: '🧑‍🔬', status: 'offline' },
-  { id: '5', name: 'Елена Смирнова', avatar: '👩‍💼', status: 'away' },
-  { id: '6', name: 'Сергей Волков', avatar: '👨‍🚀', status: 'online' },
-  { id: '7', name: 'Анна Новикова', avatar: '👩‍🏫', status: 'busy' },
-];
-
-const mockChats: Chat[] = [
-  {
-    id: 'chat1',
-    type: 'private',
-    name: 'Алексей Петров',
-    avatar: '👨‍💻',
-    participants: [mockUsers[0], mockUsers[1]],
-    unreadCount: 2,
-    isOnline: true,
-  },
-  {
-    id: 'chat2',
-    type: 'private',
-    name: 'Мария Иванова',
-    avatar: '👩‍🎨',
-    participants: [mockUsers[0], mockUsers[2]],
-    unreadCount: 0,
-    isOnline: true,
-  },
-  {
-    id: 'chat3',
-    type: 'group',
-    name: 'Команда разработки',
-    avatar: '💻',
-    participants: [mockUsers[0], mockUsers[1], mockUsers[2], mockUsers[3]],
-    unreadCount: 5,
-  },
-  {
-    id: 'chat4',
-    type: 'private',
-    name: 'Дмитрий Козлов',
-    avatar: '🧑‍🔬',
-    participants: [mockUsers[0], mockUsers[3]],
-    unreadCount: 0,
-    isOnline: false,
-  },
-  {
-    id: 'chat5',
-    type: 'group',
-    name: 'Дизайн-команда',
-    avatar: '🎨',
-    participants: [mockUsers[0], mockUsers[2], mockUsers[4], mockUsers[6]],
-    unreadCount: 1,
-  },
-  {
-    id: 'chat6',
-    type: 'private',
-    name: 'Елена Смирнова',
-    avatar: '👩‍💼',
-    participants: [mockUsers[0], mockUsers[4]],
-    unreadCount: 0,
-    isOnline: false,
-  },
-  {
-    id: 'chat7',
-    type: 'private',
-    name: 'Сергей Волков',
-    avatar: '👨‍🚀',
-    participants: [mockUsers[0], mockUsers[5]],
-    unreadCount: 3,
-    isOnline: true,
-  },
-];
-
-const mockMessages: Record<string, Message[]> = {
-  chat1: [
-    { id: 'm1', chatId: 'chat1', senderId: '2', text: 'Привет! Как дела с проектом?', timestamp: new Date(Date.now() - 3600000), type: 'text', isRead: true },
-    { id: 'm2', chatId: 'chat1', senderId: '1', text: 'Привет! Всё идёт по плану, заканчиваю бэкенд на Go', timestamp: new Date(Date.now() - 3500000), type: 'text', isRead: true },
-    { id: 'm3', chatId: 'chat1', senderId: '2', text: 'Отлично! WebSocket уже готов?', timestamp: new Date(Date.now() - 3400000), type: 'text', isRead: true },
-    { id: 'm4', chatId: 'chat1', senderId: '1', text: 'Да, уже подключил signaling server для WebRTC', timestamp: new Date(Date.now() - 3300000), type: 'text', isRead: true },
-    { id: 'm5', chatId: 'chat1', senderId: '2', text: 'Супер! Давай созвонимся вечером обсудим детали?', timestamp: new Date(Date.now() - 1800000), type: 'text', isRead: false },
-    { id: 'm6', chatId: 'chat1', senderId: '2', text: '🎤 Голосовое сообщение', timestamp: new Date(Date.now() - 900000), type: 'voice', voiceDuration: 15, isRead: false },
-  ],
-  chat2: [
-    { id: 'm7', chatId: 'chat2', senderId: '3', text: 'Посмотри новые макеты, я обновила дизайн', timestamp: new Date(Date.now() - 7200000), type: 'text', isRead: true },
-    { id: 'm8', chatId: 'chat2', senderId: '1', text: 'Выглядит потрясающе! Мне нравится новый стиль', timestamp: new Date(Date.now() - 7100000), type: 'text', isRead: true },
-    { id: 'm9', chatId: 'chat2', senderId: '3', text: 'Спасибо! 🎉', timestamp: new Date(Date.now() - 7000000), type: 'text', isRead: true },
-  ],
-  chat3: [
-    { id: 'm10', chatId: 'chat3', senderId: '2', text: 'Всем привет! Стендап через 10 минут', timestamp: new Date(Date.now() - 5400000), type: 'text', isRead: true },
-    { id: 'm11', chatId: 'chat3', senderId: '3', text: 'Ок, буду!', timestamp: new Date(Date.now() - 5300000), type: 'text', isRead: true },
-    { id: 'm12', chatId: 'chat3', senderId: '4', text: 'Я немного опоздаю, начните без меня', timestamp: new Date(Date.now() - 5200000), type: 'text', isRead: true },
-    { id: 'm13', chatId: 'chat3', senderId: '1', text: 'Хорошо, подождём 5 минут', timestamp: new Date(Date.now() - 5100000), type: 'text', isRead: true },
-    { id: 'm14', chatId: 'chat3', senderId: '2', text: 'Ребят, кто может провести код-ревью PR #142?', timestamp: new Date(Date.now() - 3600000), type: 'text', isRead: false },
-  ],
-  chat4: [
-    { id: 'm15', chatId: 'chat4', senderId: '1', text: 'Дим, можешь глянуть логи на проде?', timestamp: new Date(Date.now() - 86400000), type: 'text', isRead: true },
-    { id: 'm16', chatId: 'chat4', senderId: '4', text: 'Сейчас посмотрю', timestamp: new Date(Date.now() - 86300000), type: 'text', isRead: true },
-  ],
-  chat5: [
-    { id: 'm17', chatId: 'chat5', senderId: '6', text: 'Новая палитра готова, смотрите в Figma', timestamp: new Date(Date.now() - 10800000), type: 'text', isRead: false },
-  ],
-  chat6: [
-    { id: 'm18', chatId: 'chat6', senderId: '5', text: 'Встреча перенесена на завтра в 14:00', timestamp: new Date(Date.now() - 43200000), type: 'text', isRead: true },
-  ],
-  chat7: [
-    { id: 'm19', chatId: 'chat7', senderId: '6', text: 'Тестирование API завершено, всё работает!', timestamp: new Date(Date.now() - 600000), type: 'text', isRead: false },
-    { id: 'm20', chatId: 'chat7', senderId: '6', text: '🎤 Голосовое', timestamp: new Date(Date.now() - 500000), type: 'voice', voiceDuration: 8, isRead: false },
-    { id: 'm21', chatId: 'chat7', senderId: '6', text: 'Нужно ещё нагрузочное тестирование провести', timestamp: new Date(Date.now() - 400000), type: 'text', isRead: false },
-  ],
-};
 
 // State
 interface AppState {
@@ -131,7 +18,7 @@ interface AppState {
   wsStatus: WSConnectionStatus;
 }
 
-// Get authenticated user or use default
+// Get authenticated user
 const authUser = authService.getUser();
 const currentUser: User = authUser
   ? {
@@ -140,14 +27,14 @@ const currentUser: User = authUser
       avatar: authUser.avatar,
       status: 'online',
     }
-  : mockUsers[0];
+  : { id: '', name: '', avatar: '👤', status: 'offline' };
 
 const initialState: AppState = {
   currentUser,
-  users: mockUsers,
-  chats: mockChats,
-  messages: mockMessages,
-  activeChatId: 'chat1',
+  users: [],
+  chats: [],
+  messages: {},
+  activeChatId: null,
   call: {
     isActive: false,
     type: 'voice',
@@ -172,8 +59,9 @@ const initialState: AppState = {
 
 // Actions
 type Action =
-  | { type: 'SET_ACTIVE_CHAT'; payload: string }
+  | { type: 'SET_ACTIVE_CHAT'; payload: string | null }
   | { type: 'SET_CHATS'; payload: Chat[] }
+  | { type: 'ADD_CHAT'; payload: Chat }
   | { type: 'SET_MESSAGES'; payload: { chatId: string; messages: Message[] } }
   | { type: 'SEND_MESSAGE'; payload: { chatId: string; message: Message } }
   | { type: 'RECEIVE_MESSAGE'; payload: { chatId: string; message: Message } }
@@ -199,6 +87,20 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_CHATS':
       return { ...state, chats: action.payload };
 
+    case 'ADD_CHAT': {
+      // Check if chat already exists
+      const exists = state.chats.some(c => c.id === action.payload.id);
+      if (exists) {
+        // Update existing chat
+        return {
+          ...state,
+          chats: state.chats.map(c => c.id === action.payload.id ? action.payload : c),
+        };
+      }
+      // Add new chat at the beginning
+      return { ...state, chats: [action.payload, ...state.chats] };
+    }
+
     case 'SET_MESSAGES':
       return {
         ...state,
@@ -210,8 +112,22 @@ function reducer(state: AppState, action: Action): AppState {
 
     case 'SEND_MESSAGE': {
       const chatMessages = state.messages[action.payload.chatId] || [];
+      // Update chat's last message and move it to top
+      const updatedChats = state.chats.map(c => {
+        if (c.id === action.payload.chatId) {
+          return { ...c, lastMessage: action.payload.message };
+        }
+        return c;
+      });
+      // Move updated chat to top
+      const chatIndex = updatedChats.findIndex(c => c.id === action.payload.chatId);
+      if (chatIndex > 0) {
+        const [chat] = updatedChats.splice(chatIndex, 1);
+        updatedChats.unshift(chat);
+      }
       return {
         ...state,
+        chats: updatedChats,
         messages: {
           ...state.messages,
           [action.payload.chatId]: [...chatMessages, action.payload.message],
@@ -221,15 +137,32 @@ function reducer(state: AppState, action: Action): AppState {
 
     case 'RECEIVE_MESSAGE': {
       const chatMessages = state.messages[action.payload.chatId] || [];
+      
+      // Check if message already exists (avoid duplicates)
+      const messageExists = chatMessages.some(m => m.id === action.payload.message.id);
+      if (messageExists) {
+        return state;
+      }
+
       const updatedChats = state.chats.map(c => {
-        if (c.id === action.payload.chatId && c.id !== state.activeChatId) {
-          return { ...c, unreadCount: c.unreadCount + 1, lastMessage: action.payload.message };
-        }
         if (c.id === action.payload.chatId) {
-          return { ...c, lastMessage: action.payload.message };
+          const updates: Partial<Chat> = { lastMessage: action.payload.message };
+          // Only increment unread if this is not the active chat
+          if (c.id !== state.activeChatId) {
+            updates.unreadCount = c.unreadCount + 1;
+          }
+          return { ...c, ...updates };
         }
         return c;
       });
+
+      // Move chat with new message to top
+      const chatIndex = updatedChats.findIndex(c => c.id === action.payload.chatId);
+      if (chatIndex > 0) {
+        const [chat] = updatedChats.splice(chatIndex, 1);
+        updatedChats.unshift(chat);
+      }
+
       return {
         ...state,
         chats: updatedChats,
@@ -306,9 +239,6 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, wsStatus: action.payload };
 
     case 'UPDATE_USER_STATUS': {
-      const updatedUsers = state.users.map(u =>
-        u.id === action.payload.userId ? { ...u, status: action.payload.status } : u
-      );
       const updatedChats = state.chats.map(c => {
         const participant = c.participants.find(p => p.id === action.payload.userId);
         if (participant) {
@@ -316,7 +246,7 @@ function reducer(state: AppState, action: Action): AppState {
         }
         return c;
       });
-      return { ...state, users: updatedUsers, chats: updatedChats };
+      return { ...state, chats: updatedChats };
     }
 
     default:
@@ -332,6 +262,8 @@ interface AppContextType {
   audioRecorder: AudioRecorder;
   sendMessage: (chatId: string, text: string) => void;
   sendVoiceMessage: (chatId: string, audioData: string, duration: number, waveform: number[]) => void;
+  refreshChats: () => Promise<void>;
+  refreshMessages: (chatId: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -340,15 +272,90 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const wsClientRef = useRef<WebSocketClient | null>(null);
   const audioRecorderRef = useRef(new AudioRecorder());
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // Refresh chats from server
+  const refreshChats = useCallback(async () => {
+    try {
+      const chatsWithDetails = await apiService.getUserChatsWithDetails();
+      
+      const chats: Chat[] = chatsWithDetails.map(chatDetail => {
+        const otherParticipant = chatDetail.participants.find(p => p.id !== stateRef.current.currentUser.id);
+        const chatName = chatDetail.chat.type === 'private' && otherParticipant
+          ? otherParticipant.displayName
+          : chatDetail.chat.name || 'Чат';
+        
+        return {
+          id: chatDetail.chat.id,
+          type: chatDetail.chat.type,
+          name: chatName,
+          avatar: chatDetail.chat.type === 'private' && otherParticipant
+            ? otherParticipant.avatar
+            : chatDetail.chat.avatar || '💬',
+          participants: chatDetail.participants.map(p => ({
+            id: p.id,
+            name: p.displayName,
+            avatar: p.avatar,
+            status: p.status as any,
+          })),
+          unreadCount: chatDetail.unreadCount,
+          isOnline: otherParticipant?.status === 'online',
+        };
+      });
+
+      dispatch({ type: 'SET_CHATS', payload: chats });
+
+      // Set first chat as active if no active chat
+      if (chats.length > 0 && !stateRef.current.activeChatId) {
+        dispatch({ type: 'SET_ACTIVE_CHAT', payload: chats[0].id });
+      }
+    } catch (err) {
+      console.error('Failed to load chats:', err);
+    }
+  }, []);
+
+  // Refresh messages for a specific chat
+  const refreshMessages = useCallback(async (chatId: string) => {
+    try {
+      const messages = await apiService.getChatMessages(chatId);
+      
+      const appMessages: Message[] = messages.map(msg => ({
+        id: msg.id,
+        chatId: msg.chatId,
+        senderId: msg.senderId,
+        text: msg.text,
+        timestamp: new Date(msg.createdAt),
+        type: msg.type as any,
+        voiceDuration: msg.voiceDuration,
+        audioData: msg.audioData,
+        waveform: msg.waveform,
+        isRead: true,
+      }));
+
+      dispatch({ type: 'SET_MESSAGES', payload: { chatId, messages: appMessages } });
+      await apiService.markChatAsRead(chatId);
+      dispatch({ type: 'MARK_AS_READ', payload: chatId });
+    } catch (err) {
+      console.error('Failed to load messages:', err);
+    }
+  }, []);
 
   // Initialize WebSocket connection
   useEffect(() => {
+    if (!state.currentUser.id) return;
+
     const ws = getWebSocketClient(state.currentUser.id);
     wsClientRef.current = ws;
 
     // Listen for connection status
     ws.onStatus((status) => {
       dispatch({ type: 'SET_WS_STATUS', payload: { status } });
+
+      // When connected, refresh chats
+      if (status === 'connected') {
+        refreshChats();
+      }
     });
 
     // Listen for incoming messages
@@ -368,9 +375,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'RECEIVE_MESSAGE', payload: { chatId: payload.chatId, message } });
     });
 
+    // Listen for new chat created
+    ws.on('new-chat', (payload: any) => {
+      // Refresh chats when a new chat is created
+      refreshChats();
+    });
+
     // Listen for typing indicators
     ws.on('typing', (payload: any) => {
-      // Could show typing indicator in UI
       console.log('[WS] User typing:', payload.userId, 'in chat:', payload.chatId);
     });
 
@@ -385,91 +397,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // Connect
     ws.connect();
 
+    // Initial load of chats
+    refreshChats();
+
     return () => {
       destroyWebSocketClient();
     };
-  }, [state.currentUser.id]);
-
-  // Load chats from database
-  useEffect(() => {
-    const loadChats = async () => {
-      try {
-        const chatsWithDetails = await apiService.getUserChatsWithDetails();
-        
-        // Convert to app format
-        const chats: Chat[] = chatsWithDetails.map(chatDetail => {
-          const otherParticipant = chatDetail.participants.find(p => p.id !== state.currentUser.id);
-          const chatName = chatDetail.chat.type === 'private' && otherParticipant
-            ? otherParticipant.displayName
-            : chatDetail.chat.name || 'Чат';
-          
-          return {
-            id: chatDetail.chat.id,
-            type: chatDetail.chat.type,
-            name: chatName,
-            avatar: chatDetail.chat.type === 'private' && otherParticipant
-              ? otherParticipant.avatar
-              : chatDetail.chat.avatar || '💬',
-            participants: chatDetail.participants.map(p => ({
-              id: p.id,
-              name: p.displayName,
-              avatar: p.avatar,
-              status: p.status as any,
-            })),
-            unreadCount: chatDetail.unreadCount,
-            isOnline: otherParticipant?.status === 'online',
-          };
-        });
-
-        // Update state with real chats
-        dispatch({ type: 'SET_CHATS', payload: chats });
-
-        // Set first chat as active if no active chat
-        if (chats.length > 0 && !state.activeChatId) {
-          dispatch({ type: 'SET_ACTIVE_CHAT', payload: chats[0].id });
-        }
-      } catch (err) {
-        console.error('Failed to load chats:', err);
-      }
-    };
-
-    loadChats();
-  }, [state.currentUser.id]);
+  }, [state.currentUser.id, refreshChats]);
 
   // Load messages for active chat
   useEffect(() => {
-    const loadMessages = async () => {
-      if (!state.activeChatId) return;
-
-      try {
-        const messages = await apiService.getChatMessages(state.activeChatId);
-        
-        // Convert to app format
-        const appMessages: Message[] = messages.map(msg => ({
-          id: msg.id,
-          chatId: msg.chatId,
-          senderId: msg.senderId,
-          text: msg.text,
-          timestamp: new Date(msg.createdAt),
-          type: msg.type as any,
-          voiceDuration: msg.voiceDuration,
-          audioData: msg.audioData,
-          waveform: msg.waveform,
-          isRead: true,
-        }));
-
-        // Update state with messages
-        dispatch({ type: 'SET_MESSAGES', payload: { chatId: state.activeChatId, messages: appMessages } });
-
-        // Mark chat as read
-        await apiService.markChatAsRead(state.activeChatId);
-      } catch (err) {
-        console.error('Failed to load messages:', err);
-      }
-    };
-
-    loadMessages();
-  }, [state.activeChatId]);
+    if (!state.activeChatId) return;
+    refreshMessages(state.activeChatId);
+  }, [state.activeChatId, refreshMessages]);
 
   // Send text message
   const sendMessage = (chatId: string, text: string) => {
@@ -499,7 +439,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   // Send voice message
-  const sendVoiceMessage = async (chatId: string, audioData: string, duration: number, waveform: number[]) => {
+  const sendVoiceMessage = (chatId: string, audioData: string, duration: number, waveform: number[]) => {
     const message: Message = {
       id: `m${Date.now()}`,
       chatId,
@@ -540,6 +480,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         audioRecorder: audioRecorderRef.current,
         sendMessage,
         sendVoiceMessage,
+        refreshChats,
+        refreshMessages,
       }}
     >
       {children}

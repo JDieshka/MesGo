@@ -72,13 +72,31 @@ export default function Sidebar() {
 
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto">
+        {chats.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center p-6">
+            <div className="text-5xl mb-4">💬</div>
+            <h3 className="text-lg font-medium text-gray-300 mb-2">Нет чатов</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Создайте новый чат, чтобы начать общение
+            </p>
+            <button
+              onClick={() => setShowNewChat(true)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
+            >
+              Создать чат
+            </button>
+          </div>
+        ) : (
+        <>
         {/* Private Chats */}
         <div className="px-3 py-2">
           <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wider mb-2 px-2">
             <Users className="w-3 h-3" />
             Личные сообщения
           </div>
-          {chats.filter(c => c.type === 'private').map(chat => {
+          {chats.filter(c => c.type === 'private').length === 0 ? (
+            <p className="text-xs text-gray-600 px-2 py-1">Нет личных чатов</p>
+          ) : chats.filter(c => c.type === 'private').map(chat => {
             const lastMsg = getLastMessage(chat.id);
             return (
               <div
@@ -130,7 +148,9 @@ export default function Sidebar() {
             <Users className="w-3 h-3" />
             Группы
           </div>
-          {chats.filter(c => c.type === 'group').map(chat => {
+          {chats.filter(c => c.type === 'group').length === 0 ? (
+            <p className="text-xs text-gray-600 px-2 py-1">Нет групповых чатов</p>
+          ) : chats.filter(c => c.type === 'group').map(chat => {
             const lastMsg = getLastMessage(chat.id);
             return (
               <div
@@ -175,6 +195,8 @@ export default function Sidebar() {
             );
           })}
         </div>
+        </>
+        )}
       </div>
       {/* User Profile & Settings */}
       <div className="p-3 border-t border-gray-800">

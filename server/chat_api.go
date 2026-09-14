@@ -200,6 +200,23 @@ func CreateChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Notify all participants via WebSocket about new chat
+	newChatPayload, _ := json.Marshal(map[string]interface{}{
+		"chatId": chat.ID,
+		"chat":   chat,
+	})
+	newChatMsg, _ := json.Marshal(WSMessage{
+		Type:    "new-chat",
+		Payload: newChatPayload,
+	})
+
+	// Send to all participants (except creator)
+	for _, participant := range participants {
+		if participant.ID != currentUserID {
+			hub.SendTo(participant.ID.String(), newChatMsg)
+		}
+	}
+
 	// Response
 	type ChatResponse struct {
 		Chat         *Chat  `json:"chat"`

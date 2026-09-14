@@ -9,7 +9,7 @@ interface Props {
 }
 
 export default function NewChatModal({ isOpen, onClose }: Props) {
-  const { state, dispatch } = useAppContext();
+  const { state, dispatch, refreshChats } = useAppContext();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [isGroup, setIsGroup] = useState(false);
@@ -60,17 +60,24 @@ export default function NewChatModal({ isOpen, onClose }: Props) {
       setLoading(true);
       setError('');
 
+      let newChatId: string | null = null;
+
       if (isGroup) {
         // Create group chat
         const result = await apiService.createGroupChat(groupName, selectedUsers);
-        console.log('Group chat created:', result);
+        newChatId = result.chat.id;
       } else {
         // Create private chat
         const result = await apiService.createPrivateChat(selectedUsers[0]);
-        console.log('Private chat created:', result);
-        
-        // Navigate to the new chat
-        dispatch({ type: 'SET_ACTIVE_CHAT', payload: result.chat.id });
+        newChatId = result.chat.id;
+      }
+
+      // Refresh chats list to show new chat
+      await refreshChats();
+
+      // Navigate to the new chat
+      if (newChatId) {
+        dispatch({ type: 'SET_ACTIVE_CHAT', payload: newChatId });
       }
 
       // Reset and close modal
