@@ -266,4 +266,18 @@ export class WebRTCManager {
   getLocalStream(): MediaStream | null {
     return this.localStream;
   }
+
+  getRemoteStream(): MediaStream | null {
+    // Get remote stream from first peer
+    for (const peer of this.peers.values()) {
+      if (peer.remoteStream) {
+        return peer.remoteStream;
+      }
+    }
+    return null;
+  }
+
+  getScreenStream(): MediaStream | null {
+    return this.screenStream;
+  }
 }

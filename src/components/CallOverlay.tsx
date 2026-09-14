@@ -6,10 +6,12 @@ import {
 } from 'lucide-react';
 
 export default function CallOverlay() {
-  const { state, dispatch, acceptCall, rejectCall, endCall, toggleMute, toggleCamera, toggleScreenShare } = useAppContext();
+  const { state, dispatch, acceptCall, rejectCall, endCall, toggleMute, toggleCamera, toggleScreenShare, callManager } = useAppContext();
   const { call, chats } = state;
   const [isFullscreen, setIsFullscreen] = useState(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const screenRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -23,88 +25,95 @@ export default function CallOverlay() {
       return;
     }
 
-    if (call.type === 'video' && !call.isCameraOff) {
-      startCamera();
+    // Get local stream from CallManager
+    if (callManager) {
+      const webrtc = callManager.getWebRTC();
+      if (webrtc) {
+        const localStream = webrtc.getLocalStream();
+        if (localStream && localVideoRef.current) {
+          console.log('[CallOverlay] Setting local video stream');
+          localVideoRef.current.srcObject = localStream;
+        }
+      }
     }
 
     return () => {
       // Don't cleanup on unmount, only on call end
     };
-  }, [call.isActive, call.type]);
+  }, [call.isActive, callManager]);
 
   // Handle camera toggle
   useEffect(() => {
-    if (!call.isActive || call.type !== 'video') return;
+    if (!call.isActive || !callManager) return;
 
-    if (call.isCameraOff) {
-      stopCamera();
-    } else {
-      startCamera();
+    const webrtc = callManager.getWebRTC();
+    if (!webrtc) return;
+
+    const localStream = webrtc.getLocalStream();
+    if (localStream && localVideoRef.current) {
+      localVideoRef.current.srcObject = localStream;
     }
-  }, [call.isCameraOff]);
+  }, [call.isCameraOff, callManager]);
 
   // Handle screen share
   useEffect(() => {
-    if (!call.isActive) return;
+    if (!call.isActive || !callManager) return;
 
+    const webrtc = callManager.getWebRTC();
+    if (!webrtc) return;
+
+    // Get screen stream from WebRTC if screen sharing is active
     if (call.isScreenSharing) {
-      startScreenShare();
-    } else {
-      stopScreenShare();
-    }
-  }, [call.isScreenSharing]);
-
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 1280, height: 720 },
-        audio: true,
-      });
-      localStreamRef.current = stream;
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
+      const screenStream = webrtc.getScreenStream();
+      if (screenStream && screenRef.current) {
+        console.log('[CallOverlay] Setting screen share stream');
+        screenRef.current.srcObject = screenStream;
       }
-    } catch (err) {
-      console.log('Camera access denied or not available');
     }
-  };
+  }, [call.isScreenSharing, callManager]);
 
-  const stopCamera = () => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-      localStreamRef.current = null;
-    }
-  };
+  // Handle remote streams from WebRTC
+  useEffect(() => {
+    if (!call.isActive || !callManager) return;
 
-  const startScreenShare = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { cursor: 'always' } as any,
-        audio: true,
-      });
-      screenStreamRef.current = stream;
-      if (screenRef.current) {
-        screenRef.current.srcObject = stream;
+    const webrtc = callManager.getWebRTC();
+    if (!webrtc) return;
+
+    // Get remote stream from WebRTC
+    const remoteStream = webrtc.getRemoteStream();
+    if (remoteStream) {
+      console.log('[CallOverlay] Remote stream received');
+      
+      // Set video stream
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStream;
       }
-      stream.getVideoTracks()[0].onended = () => {
-        dispatch({ type: 'TOGGLE_SCREEN_SHARE' });
-      };
-    } catch (err) {
-      console.log('Screen share access denied');
-      dispatch({ type: 'TOGGLE_SCREEN_SHARE' });
+      
+      // Set audio stream
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = remoteStream;
+      }
     }
-  };
 
-  const stopScreenShare = () => {
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach(track => track.stop());
-      screenStreamRef.current = null;
-    }
-  };
+    // Listen for remote stream changes
+    const checkRemoteStream = setInterval(() => {
+      const stream = webrtc.getRemoteStream();
+      if (stream && remoteVideoRef.current && remoteVideoRef.current.srcObject !== stream) {
+        console.log('[CallOverlay] Updating remote stream');
+        remoteVideoRef.current.srcObject = stream;
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = stream;
+        }
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(checkRemoteStream);
+    };
+  }, [call.isActive, callManager]);
 
   const cleanup = () => {
-    stopCamera();
-    stopScreenShare();
+    // Cleanup is handled by CallManager
   };
 
   const handleEndCall = () => {
@@ -249,13 +258,23 @@ export default function CallOverlay() {
             </div>
 
             {/* Remote Participants */}
-            {call.participants.map((participant) => (
+            {call.participants.map((participant, index) => (
               <div key={participant.id} className="relative rounded-xl overflow-hidden bg-gray-800">
-                <div className="w-full h-full flex items-center justify-center">
-                  <div className="w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center text-4xl">
-                    {participant.avatar}
+                {/* Remote Video */}
+                {index === 0 ? (
+                  <video
+                    ref={remoteVideoRef}
+                    autoPlay
+                    playsInline
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <div className="w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center text-4xl">
+                      {participant.avatar}
+                    </div>
                   </div>
-                </div>
+                )}
                 <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/60 rounded-md text-xs text-white flex items-center gap-1.5">
                   {participant.name}
                   <div className="flex items-center gap-0.5">
@@ -283,6 +302,9 @@ export default function CallOverlay() {
         {/* Voice Call UI */}
         {call.type === 'voice' && (
           <div className="text-center">
+            {/* Remote Audio for voice calls */}
+            <audio ref={remoteAudioRef} autoPlay />
+            
             <div className="w-32 h-32 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-6xl mb-6 mx-auto shadow-2xl shadow-blue-500/20 animate-pulse">
               {activeChat?.avatar || '👤'}
             </div>
