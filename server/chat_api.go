@@ -254,17 +254,20 @@ func GetUserChatsWithDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	var result []ChatWithDetails
 
 	for _, chat := range chats {
+		// Create a copy of chat to avoid loop variable capture issue
+		chatCopy := chat
+		
 		// Get participants
-		participants, err := chatRepo.GetChatParticipants(chat.ID)
+		participants, err := chatRepo.GetChatParticipants(chatCopy.ID)
 		if err != nil {
 			continue
 		}
 
 		// Get last message
-		messages, err := msgRepo.GetChatMessages(chat.ID, 1, 0)
+		messages, err := msgRepo.GetChatMessages(chatCopy.ID, 1, 0)
 		if err != nil || len(messages) == 0 {
 			result = append(result, ChatWithDetails{
-				Chat:         &chat,
+				Chat:         &chatCopy,
 				Participants: participants,
 				UnreadCount:  0,
 			})
@@ -272,10 +275,10 @@ func GetUserChatsWithDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Get unread count
-		unreadCount, _ := msgRepo.GetUnreadCount(chat.ID, currentUserID)
+		unreadCount, _ := msgRepo.GetUnreadCount(chatCopy.ID, currentUserID)
 
 		result = append(result, ChatWithDetails{
-			Chat:         &chat,
+			Chat:         &chatCopy,
 			Participants: participants,
 			LastMessage:  &messages[0],
 			UnreadCount:  unreadCount,
