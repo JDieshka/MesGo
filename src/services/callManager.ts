@@ -91,12 +91,17 @@ export class CallManager {
     this.webrtc = new WebRTCManager({
       onLocalStream: (stream) => {
         console.log('[CallManager] Local stream acquired');
+        // Trigger state update
+        this.stateHandler(this.state);
       },
       onRemoteStream: (stream) => {
         console.log('[CallManager] Remote stream received');
+        // Trigger state update
+        this.stateHandler(this.state);
       },
       onRemoteStreamRemoved: (peerId) => {
         console.log('[CallManager] Remote stream removed:', peerId);
+        this.stateHandler(this.state);
       },
       onIceCandidate: (candidate, peerId) => {
         console.log('[CallManager] Sending ICE candidate to:', peerId);
@@ -129,6 +134,11 @@ export class CallManager {
       },
       onScreenTrack: (stream, peerId) => {
         console.log('[CallManager] Screen track received from:', peerId);
+        this.stateHandler(this.state);
+      },
+      onStreamsChange: () => {
+        console.log('[CallManager] Streams changed, updating UI');
+        this.stateHandler(this.state);
       },
     });
 
@@ -176,12 +186,17 @@ export class CallManager {
     this.webrtc = new WebRTCManager({
       onLocalStream: (stream) => {
         console.log('[CallManager] Local stream acquired');
+        // Trigger state update
+        this.stateHandler(this.state);
       },
       onRemoteStream: (stream) => {
         console.log('[CallManager] Remote stream received');
+        // Trigger state update
+        this.stateHandler(this.state);
       },
       onRemoteStreamRemoved: (peerId) => {
         console.log('[CallManager] Remote stream removed:', peerId);
+        this.stateHandler(this.state);
       },
       onIceCandidate: (candidate, peerId) => {
         console.log('[CallManager] Sending ICE candidate to:', peerId);
@@ -214,6 +229,11 @@ export class CallManager {
       },
       onScreenTrack: (stream, peerId) => {
         console.log('[CallManager] Screen track received from:', peerId);
+        this.stateHandler(this.state);
+      },
+      onStreamsChange: () => {
+        console.log('[CallManager] Streams changed, updating UI');
+        this.stateHandler(this.state);
       },
     });
 

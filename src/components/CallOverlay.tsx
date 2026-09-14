@@ -25,21 +25,36 @@ export default function CallOverlay() {
       return;
     }
 
-    // Get local stream from CallManager
-    if (callManager) {
-      const webrtc = callManager.getWebRTC();
-      if (webrtc) {
-        const localStream = webrtc.getLocalStream();
-        if (localStream && localVideoRef.current) {
-          console.log('[CallOverlay] Setting local video stream');
-          localVideoRef.current.srcObject = localStream;
+    const setupLocalStream = () => {
+      if (callManager) {
+        const webrtc = callManager.getWebRTC();
+        if (webrtc) {
+          const localStream = webrtc.getLocalStream();
+          if (localStream && localVideoRef.current) {
+            console.log('[CallOverlay] Setting local video stream');
+            localVideoRef.current.srcObject = localStream;
+            return true;
+          }
         }
       }
-    }
-
-    return () => {
-      // Don't cleanup on unmount, only on call end
+      return false;
     };
+
+    // Try to set local stream immediately
+    if (!setupLocalStream()) {
+      // If not available, retry after a short delay
+      console.log('[CallOverlay] Local stream not ready, will retry...');
+      const retryInterval = setInterval(() => {
+        if (setupLocalStream()) {
+          clearInterval(retryInterval);
+        }
+      }, 100);
+      
+      // Stop retrying after 5 seconds
+      setTimeout(() => clearInterval(retryInterval), 5000);
+      
+      return () => clearInterval(retryInterval);
+    }
   }, [call.isActive, callManager]);
 
   // Handle camera toggle
@@ -76,53 +91,61 @@ export default function CallOverlay() {
   useEffect(() => {
     if (!call.isActive || !callManager) return;
 
-    const webrtc = callManager.getWebRTC();
-    if (!webrtc) {
-      console.log('[CallOverlay] No WebRTC manager');
-      return;
-    }
-
-    console.log('[CallOverlay] Checking for remote streams...');
-
-    // Get remote stream from WebRTC
-    const remoteStream = webrtc.getRemoteStream();
-    if (remoteStream) {
-      console.log('[CallOverlay] Remote stream received:', remoteStream);
-      console.log('[CallOverlay] Remote stream tracks:', remoteStream.getTracks());
-      
-      // Set video stream
-      if (remoteVideoRef.current) {
-        console.log('[CallOverlay] Setting remote video stream');
-        remoteVideoRef.current.srcObject = remoteStream;
+    const setupRemoteStream = () => {
+      const webrtc = callManager.getWebRTC();
+      if (!webrtc) {
+        console.log('[CallOverlay] No WebRTC manager');
+        return false;
       }
-      
-      // Set audio stream
-      if (remoteAudioRef.current) {
-        console.log('[CallOverlay] Setting remote audio stream');
-        remoteAudioRef.current.srcObject = remoteStream;
-      }
-    } else {
-      console.log('[CallOverlay] No remote stream yet');
-    }
 
-    // Listen for remote stream changes
-    const checkRemoteStream = setInterval(() => {
-      const stream = webrtc.getRemoteStream();
-      if (stream) {
-        if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== stream) {
-          console.log('[CallOverlay] Updating remote video stream');
-          remoteVideoRef.current.srcObject = stream;
+      console.log('[CallOverlay] Checking for remote streams...');
+
+      // Get remote stream from WebRTC
+      const remoteStream = webrtc.getRemoteStream();
+      if (remoteStream) {
+        console.log('[CallOverlay] Remote stream received:', remoteStream);
+        console.log('[CallOverlay] Remote stream tracks:', remoteStream.getTracks());
+        
+        // Set video stream
+        if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== remoteStream) {
+          console.log('[CallOverlay] Setting remote video stream');
+          remoteVideoRef.current.srcObject = remoteStream;
         }
-        if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== stream) {
-          console.log('[CallOverlay] Updating remote audio stream');
-          remoteAudioRef.current.srcObject = stream;
+        
+        // Set audio stream
+        if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== remoteStream) {
+          console.log('[CallOverlay] Setting remote audio stream');
+          remoteAudioRef.current.srcObject = remoteStream;
         }
+        
+        return true;
+      } else {
+        console.log('[CallOverlay] No remote stream yet');
+        return false;
       }
-    }, 1000);
-
-    return () => {
-      clearInterval(checkRemoteStream);
     };
+
+    // Try to set remote stream immediately
+    if (!setupRemoteStream()) {
+      // If not available, retry more frequently
+      console.log('[CallOverlay] Remote stream not ready, will retry...');
+      const retryInterval = setInterval(() => {
+        if (setupRemoteStream()) {
+          clearInterval(retryInterval);
+        }
+      }, 100);
+      
+      // Stop retrying after 10 seconds
+      const timeout = setTimeout(() => {
+        clearInterval(retryInterval);
+        console.log('[CallOverlay] Remote stream setup timeout');
+      }, 10000);
+      
+      return () => {
+        clearInterval(retryInterval);
+        clearTimeout(timeout);
+      };
+    }
   }, [call.isActive, callManager]);
 
   const cleanup = () => {

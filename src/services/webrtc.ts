@@ -11,6 +11,7 @@ export interface WebRTCConfig {
   onNegotiationNeeded: (offer: RTCSessionDescriptionInit, peerId: string) => void;
   onConnectionStateChange: (state: RTCPeerConnectionState, peerId: string) => void;
   onScreenTrack: (stream: MediaStream | null, peerId: string) => void;
+  onStreamsChange?: () => void; // Callback when streams change
 }
 
 const ICE_SERVERS: RTCIceServer[] = [
@@ -113,10 +114,18 @@ export class WebRTCManager {
         this.config.onRemoteStream(remoteStream);
       }
       
+      // Notify about streams change
+      if (this.config.onStreamsChange) {
+        this.config.onStreamsChange();
+      }
+      
       // Handle track end
       track.onended = () => {
         console.log('[WebRTC] Track ended:', track.kind);
         remoteStream!.removeTrack(track);
+        if (this.config.onStreamsChange) {
+          this.config.onStreamsChange();
+        }
       };
     };
 
