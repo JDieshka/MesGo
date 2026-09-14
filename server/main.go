@@ -443,19 +443,22 @@ func main() {
 	
 	router.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendPath)))
 
-	port := ":8080"
-	log.Printf("🚀 GoTalk server starting on port %s", port)
-	log.Printf("🌐 Server is accessible from all network interfaces (0.0.0.0)")
+	// Start HTTPS server (required for camera/microphone access)
+	port := ":8443"
+	log.Printf("🚀 GoTalk HTTPS server starting on port %s", port)
 	log.Printf("")
 	log.Printf("📡 Available endpoints:")
-	log.Printf("   Local:    http://localhost%s", port)
-	log.Printf("   Network:  http://<your-pc-ip>%s (e.g., http://192.168.1.156%s)", port, port)
-	log.Printf("   WebSocket: ws://<your-pc-ip>%s/ws/{userId}", port)
+	log.Printf("   Local:    https://localhost%s", port)
+	log.Printf("   Network:  https://192.168.1.156%s", port)
+	log.Printf("   WebSocket: wss://192.168.1.156%s/ws/{userId}", port)
 	log.Printf("")
-	log.Printf("🔐 Auth endpoints: http://<your-pc-ip>%s/api/auth/", port)
-	log.Printf("💬 REST API: http://<your-pc-ip>%s/api/", port)
+	log.Printf("🔐 Auth endpoints: https://192.168.1.156%s/api/auth/", port)
+	log.Printf("💬 REST API: https://192.168.1.156%s/api/", port)
+	log.Printf("")
+	log.Printf("⚠️  Browser will show security warning (self-signed certificate)")
+	log.Printf("   Click 'Advanced' -> 'Proceed to 192.168.1.156 (unsafe)' to continue")
 
-	if err := http.ListenAndServe(port, router); err != nil {
+	if err := startHTTPSServer(&router, port); err != nil {
 		log.Fatal("Server failed to start:", err)
 	}
 }

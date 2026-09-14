@@ -89,9 +89,19 @@ export default function ChatWindow() {
 
   const { startCall } = useAppContext();
 
-  const handleStartCall = (type: 'voice' | 'video') => {
-    if (activeChatId) {
-      startCall(activeChatId, type);
+  const handleStartCall = async (type: 'voice' | 'video') => {
+    if (!activeChatId) {
+      console.error('[ChatWindow] No active chat ID');
+      return;
+    }
+    
+    console.log('[ChatWindow] Starting call:', { chatId: activeChatId, type });
+    
+    try {
+      await startCall(activeChatId, type);
+      console.log('[ChatWindow] Call started successfully');
+    } catch (err) {
+      console.error('[ChatWindow] Failed to start call:', err);
     }
   };
 

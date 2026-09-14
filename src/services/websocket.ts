@@ -27,9 +27,11 @@ export class WebSocketClient {
     this.userId = userId;
     // Auto-detect WebSocket URL from current page location
     // Works on localhost, local network (192.168.x.x), or any domain
+    // Automatically uses wss:// for HTTPS and ws:// for HTTP
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = baseUrl || `${protocol}//${window.location.host}`;
     this.url = `${host}/ws/${userId}`;
+    console.log('[WebSocket] Connecting to:', this.url);
   }
 
   connect(): void {

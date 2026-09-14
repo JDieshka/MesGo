@@ -5,7 +5,9 @@
 
 // Auto-detect API base URL from current page location
 // Works on localhost, local network (192.168.x.x), or any domain
+// Automatically uses https:// for HTTPS and http:// for HTTP
 const API_BASE_URL = window.location.origin;
+console.log('[Auth] API base URL:', API_BASE_URL);
 
 export interface User {
   id: string;

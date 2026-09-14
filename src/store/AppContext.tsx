@@ -410,6 +410,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // Initialize CallManager
     callManagerRef.current = new CallManager(ws, (callState) => {
+      console.log('[AppContext] CallManager state update:', callState);
       // Convert CallManager state to AppState format
       dispatch({
         type: 'UPDATE_CALL',
@@ -425,6 +426,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
           callerName: callState.callerName,
         },
       });
+    });
+
+    // Listen for signaling messages (for calls)
+    ws.on('signaling', (payload: any) => {
+      console.log('[AppContext] Signaling message received:', payload.type);
+      
+      if (payload.type === 'call-request') {
+        // Incoming call
+        const chat = stateRef.current.chats.find(c => c.id === payload.chatId);
+        console.log('[AppContext] Incoming call from:', payload.from, 'in chat:', payload.chatId);
+        
+        dispatch({
+          type: 'START_CALL',
+          payload: {
+            chatId: payload.chatId,
+            type: payload.callType || 'voice',
+            isIncoming: true,
+            callerName: chat?.name || 'Unknown',
+            callerAvatar: chat?.avatar || '👤',
+          },
+        });
+      } else if (payload.type === 'call-accept') {
+        console.log('[AppContext] Call accepted');
+        dispatch({ type: 'UPDATE_CALL', payload: { isIncoming: false } });
+      } else if (payload.type === 'call-reject' || payload.type === 'call-end') {
+        console.log('[AppContext] Call ended/rejected');
+        dispatch({ type: 'END_CALL' });
+      }
+      // WebRTC signaling (offer, answer, ice-candidate) is handled by CallManager
     });
 
     // Connect
@@ -506,13 +536,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Call management methods
   const startCall = async (chatId: string, type: 'voice' | 'video') => {
-    if (!callManagerRef.current) return;
+    console.log('[AppContext] startCall called:', { chatId, type });
+    
+    if (!callManagerRef.current) {
+      console.error('[AppContext] CallManager not initialized');
+      return;
+    }
 
     const chat = state.chats.find(c => c.id === chatId);
-    if (!chat) return;
+    if (!chat) {
+      console.error('[AppContext] Chat not found:', chatId);
+      return;
+    }
 
     const otherParticipant = chat.participants.find(p => p.id !== state.currentUser.id);
-    if (!otherParticipant) return;
+    if (!otherParticipant) {
+      console.error('[AppContext] No other participant found in chat');
+      return;
+    }
+
+    console.log('[AppContext] Starting call with:', otherParticipant.name);
 
     dispatch({
       type: 'START_CALL',
@@ -525,13 +568,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
     });
 
-    await callManagerRef.current.initiateCall(
-      chatId,
-      chat.name,
-      chat.avatar,
-      otherParticipant.id,
-      type
-    );
+    try {
+      await callManagerRef.current.initiateCall(
+        chatId,
+        chat.name,
+        chat.avatar,
+        otherParticipant.id,
+        type
+      );
+      console.log('[AppContext] Call initiated successfully');
+    } catch (err) {
+      console.error('[AppContext] Failed to initiate call:', err);
+    }
   };
 
   const acceptCall = async () => {
