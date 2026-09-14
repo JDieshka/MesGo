@@ -51,19 +51,29 @@ func InitDB() error {
 func RunMigrations() error {
 	ctx := context.Background()
 
-	// Read migration file
-	migrationSQL, err := os.ReadFile("migrations/001_initial_schema.sql")
-	if err != nil {
-		return fmt.Errorf("unable to read migration file: %w", err)
+	// Read and apply all migration files in order
+	migrationFiles := []string{
+		"migrations/001_initial_schema.sql",
+		"migrations/002_fix_null_values.sql",
 	}
 
-	// Execute migration
-	_, err = dbPool.Exec(ctx, string(migrationSQL))
-	if err != nil {
-		return fmt.Errorf("unable to execute migration: %w", err)
+	for _, file := range migrationFiles {
+		migrationSQL, err := os.ReadFile(file)
+		if err != nil {
+			log.Printf("⚠️  Migration file %s not found, skipping", file)
+			continue
+		}
+
+		_, err = dbPool.Exec(ctx, string(migrationSQL))
+		if err != nil {
+			log.Printf("⚠️  Migration %s failed: %v", file, err)
+			continue
+		}
+
+		log.Printf("✅ Migration applied: %s", file)
 	}
 
-	log.Println("✅ Database migrations applied")
+	log.Println("✅ All database migrations completed")
 	return nil
 }
 

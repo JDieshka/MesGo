@@ -42,8 +42,8 @@ func (r *ChatRepository) CreatePrivateChat(user1ID, user2ID uuid.UUID) (*Chat, e
 
 	var chat Chat
 	err := dbPool.QueryRow(ctx, `
-		INSERT INTO chats (type, created_by)
-		VALUES ('private', $1)
+		INSERT INTO chats (type, name, avatar, created_by)
+		VALUES ('private', 'Private Chat', '💬', $1)
 		RETURNING id, type, name, avatar, created_by, created_at
 	`, user1ID).Scan(
 		&chat.ID, &chat.Type, &chat.Name, &chat.Avatar, &chat.CreatedBy, &chat.CreatedAt,
