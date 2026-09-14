@@ -292,7 +292,7 @@ func handleChatMessage(client *Client, payload json.RawMessage) {
 
 	// Save to database
 	msgRepo := &MessageRepository{}
-	msg, err := msgRepo.SaveMessage(
+	_, err = msgRepo.SaveMessage(
 		chatID,
 		client.UserID,
 		chatMsg.Message.Text,
