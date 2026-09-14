@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useAppContext } from '../store/AppContext';
-import { MessageCircle, Users, Search, Plus, Settings } from 'lucide-react';
+import { MessageCircle, Users, Search, Plus, Settings, LogOut } from 'lucide-react';
 import NewChatModal from './NewChatModal';
 import SettingsModal from './SettingsModal';
+import { authService } from '../services/auth';
 
 export default function Sidebar() {
   const { state, dispatch } = useAppContext();
@@ -190,6 +191,16 @@ export default function Sidebar() {
             className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 transition-colors"
           >
             <Settings className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => {
+              authService.logout();
+              window.location.reload();
+            }}
+            className="p-1.5 rounded-lg hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
+            title="Выйти"
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </div>

@@ -8,48 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
 
 // ============ Models ============
-
-type User struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Avatar   string `json:"avatar"`
-	Status   string `json:"status"`
-}
-
-type Message struct {
-	ID            string    `json:"id"`
-	ChatID        string    `json:"chatId"`
-	SenderID      string    `json:"senderId"`
-	Text          string    `json:"text"`
-	Timestamp     time.Time `json:"timestamp"`
-	Type          string    `json:"type"` // text, voice, system
-	VoiceDuration int       `json:"voiceDuration,omitempty"`
-	AudioData     string    `json:"audioData,omitempty"` // base64 encoded audio
-	Waveform      []float64 `json:"waveform,omitempty"`  // waveform visualization data
-}
-
-type Chat struct {
-	ID           string   `json:"id"`
-	Type         string   `json:"type"` // private, group
-	Name         string   `json:"name"`
-	Avatar       string   `json:"avatar"`
-	Participants []string `json:"participants"`
-}
-
-// ============ WebSocket ============
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for development
-	},
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
 
 type WSMessage struct {
 	Type    string          `json:"type"`
@@ -66,10 +30,21 @@ type TypingIndicator struct {
 	UserID string `json:"userId"`
 }
 
+// ============ WebSocket ============
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow all origins for development
+	},
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+}
+
 // ============ Client Connection ============
 
 type Client struct {
 	ID       string
+	UserID   uuid.UUID
 	Conn     *websocket.Conn
 	Send     chan []byte
 	mu       sync.Mutex
@@ -99,7 +74,21 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			h.clients[client.ID] = client
 			h.mu.Unlock()
-			log.Printf("Client connected: %s", client.ID)
+			log.Printf("Client connected: %s (user: %s)", client.ID, client.UserID)
+
+			// Update user status to online
+			userRepo := &UserRepository{}
+			userRepo.UpdateUserStatus(client.UserID, "online")
+
+			// Broadcast status update to all clients
+			statusMsg, _ := json.Marshal(WSMessage{
+				Type: "user-status",
+				Payload: map[string]interface{}{
+					"userId": client.UserID,
+					"status": "online",
+				},
+			})
+			h.BroadcastToAll(statusMsg, client.ID)
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -108,12 +97,42 @@ func (h *Hub) Run() {
 				close(client.Send)
 			}
 			h.mu.Unlock()
-			log.Printf("Client disconnected: %s", client.ID)
+			log.Printf("Client disconnected: %s (user: %s)", client.ID, client.UserID)
+
+			// Update user status to offline
+			userRepo := &UserRepository{}
+			userRepo.UpdateUserStatus(client.UserID, "offline")
+
+			// Broadcast status update
+			statusMsg, _ := json.Marshal(WSMessage{
+				Type: "user-status",
+				Payload: map[string]interface{}{
+					"userId": client.UserID,
+					"status": "offline",
+				},
+			})
+			h.BroadcastToAll(statusMsg, "")
 		}
 	}
 }
 
 func (h *Hub) BroadcastToChat(chatID string, message []byte, excludeID string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for id, client := range h.clients {
+		if id != excludeID {
+			select {
+			case client.Send <- message:
+			default:
+				close(client.Send)
+				delete(h.clients, id)
+			}
+		}
+	}
+}
+
+func (h *Hub) BroadcastToAll(message []byte, excludeID string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -165,36 +184,10 @@ type SignalingMessage struct {
 	Data     json.RawMessage `json:"data,omitempty"`
 }
 
-// ============ Message Store (In-Memory for demo) ============
-
-type MessageStore struct {
-	messages map[string][]Message
-	mu       sync.RWMutex
-}
-
-func NewMessageStore() *MessageStore {
-	return &MessageStore{
-		messages: make(map[string][]Message),
-	}
-}
-
-func (s *MessageStore) Save(msg Message) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.messages[msg.ChatID] = append(s.messages[msg.ChatID], msg)
-}
-
-func (s *MessageStore) GetByChat(chatID string) []Message {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.messages[chatID]
-}
-
 // ============ Globals ============
 
 var (
-	hub     *Hub
-	store   *MessageStore
+	hub *Hub
 )
 
 // ============ Handlers ============
@@ -203,6 +196,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID := vars["userId"]
 
+	// Parse user ID
+	parsedUserID, err := uuid.Parse(userID)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
@@ -210,9 +210,10 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &Client{
-		ID:   userID,
-		Conn: conn,
-		Send: make(chan []byte, 256),
+		ID:     userID,
+		UserID: parsedUserID,
+		Conn:   conn,
+		Send:   make(chan []byte, 256),
 	}
 
 	hub.register <- client
@@ -240,12 +241,20 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 
 			switch wsMsg.Type {
+			case "ping":
+				// Heartbeat response
+				pong, _ := json.Marshal(WSMessage{Type: "pong"})
+				client.Send <- pong
+
 			case "chat-message":
 				handleChatMessage(client, wsMsg.Payload)
+
 			case "typing":
 				handleTyping(client, wsMsg.Payload)
+
 			case "signaling":
 				handleSignaling(client, wsMsg.Payload)
+
 			default:
 				log.Printf("Unknown message type: %s", wsMsg.Type)
 			}
@@ -273,23 +282,43 @@ func handleChatMessage(client *Client, payload json.RawMessage) {
 		return
 	}
 
-	chatMsg.Message.ID = fmt.Sprintf("msg_%d", time.Now().UnixNano())
-	chatMsg.Message.SenderID = client.ID
-	chatMsg.Message.Timestamp = time.Now()
+	// Parse chat ID
+	chatID, err := uuid.Parse(chatMsg.ChatID)
+	if err != nil {
+		log.Printf("Invalid chat ID: %v", err)
+		return
+	}
 
-	// Save to store (without audio data to save memory)
-	msgToSave := chatMsg.Message
-	msgToSave.AudioData = "" // Don't store audio in memory
-	store.Save(msgToSave)
+	// Save to database
+	msgRepo := &MessageRepository{}
+	msg, err := msgRepo.SaveMessage(
+		chatID,
+		client.UserID,
+		chatMsg.Message.Text,
+		chatMsg.Message.Type,
+		chatMsg.Message.VoiceDuration,
+		chatMsg.Message.AudioData,
+		chatMsg.Message.Waveform,
+	)
 
-	// Broadcast to chat participants with full payload (including audio)
+	if err != nil {
+		log.Printf("Failed to save message: %v", err)
+		return
+	}
+
+	// Update message with generated ID and timestamp
+	chatMsg.Message.ID = msg.ID.String()
+	chatMsg.Message.SenderID = client.UserID.String()
+	chatMsg.Message.Timestamp = msg.CreatedAt
+
+	// Broadcast to chat participants
 	response, _ := json.Marshal(WSMessage{
 		Type:    "chat-message",
 		Payload: payload,
 	})
 
 	hub.BroadcastToChat(chatMsg.ChatID, response, "")
-	log.Printf("Message sent in chat %s by %s (type: %s)", chatMsg.ChatID, client.ID, chatMsg.Message.Type)
+	log.Printf("Message sent in chat %s by %s (type: %s)", chatMsg.ChatID, client.UserID, chatMsg.Message.Type)
 }
 
 func handleTyping(client *Client, payload json.RawMessage) {
@@ -313,7 +342,7 @@ func handleSignaling(client *Client, payload json.RawMessage) {
 		return
 	}
 
-	signal.From = client.ID
+	signal.From = client.UserID.String()
 
 	// Route signaling message to target
 	response, _ := json.Marshal(WSMessage{
@@ -329,15 +358,6 @@ func handleSignaling(client *Client, payload json.RawMessage) {
 	}
 }
 
-func handleGetMessages(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	chatID := vars["chatId"]
-
-	messages := store.GetByChat(chatID)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(messages)
-}
-
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -350,9 +370,19 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 // ============ Main ============
 
 func main() {
-	hub = NewHub()
-	store = NewMessageStore()
+	// Initialize database
+	if err := InitDB(); err != nil {
+		log.Printf("⚠️  Database initialization failed: %v", err)
+		log.Println("Continuing without database (messages will not be persisted)")
+	} else {
+		// Run migrations
+		if err := RunMigrations(); err != nil {
+			log.Printf("⚠️  Migration failed: %v", err)
+		}
+		defer CloseDB()
+	}
 
+	hub = NewHub()
 	go hub.Run()
 
 	router := mux.NewRouter()
@@ -361,8 +391,8 @@ func main() {
 	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
@@ -371,9 +401,19 @@ func main() {
 		})
 	})
 
-	// API Routes
+	// Public routes (no auth required)
 	router.HandleFunc("/health", handleHealth).Methods("GET")
-	router.HandleFunc("/api/messages/{chatId}", handleGetMessages).Methods("GET")
+	router.HandleFunc("/api/auth/register", RegisterHandler).Methods("POST")
+	router.HandleFunc("/api/auth/login", LoginHandler).Methods("POST")
+
+	// Protected routes (auth required)
+	api := router.PathPrefix("/api").Subrouter()
+	api.Use(AuthMiddleware)
+	api.HandleFunc("/me", GetCurrentUserHandler).Methods("GET")
+	api.HandleFunc("/chats", GetUserChatsHandler).Methods("GET")
+	api.HandleFunc("/messages/{chatId}", GetChatMessagesHandler).Methods("GET")
+
+	// WebSocket (auth via query param for now)
 	router.HandleFunc("/ws/{userId}", handleWebSocket).Methods("GET")
 
 	// Serve static files (frontend)
@@ -382,6 +422,7 @@ func main() {
 	port := ":8080"
 	log.Printf("🚀 GoTalk server starting on port %s", port)
 	log.Printf("📡 WebSocket endpoint: ws://localhost%s/ws/{userId}", port)
+	log.Printf("🔐 Auth endpoints: http://localhost%s/api/auth/", port)
 	log.Printf("💬 REST API: http://localhost%s/api/", port)
 
 	if err := http.ListenAndServe(port, router); err != nil {

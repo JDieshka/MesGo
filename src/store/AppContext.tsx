@@ -2,6 +2,7 @@ import React, { createContext, useContext, useReducer, ReactNode, useEffect, use
 import { User, Chat, Message, CallState, VoiceRecording, WSConnectionStatus } from '../types';
 import { WebSocketClient, getWebSocketClient, destroyWebSocketClient } from '../services/websocket';
 import { AudioRecorder, blobToBase64 } from '../services/audioRecorder';
+import { authService } from '../services/auth';
 
 // Mock users
 const mockUsers: User[] = [
@@ -129,8 +130,19 @@ interface AppState {
   wsStatus: WSConnectionStatus;
 }
 
+// Get authenticated user or use default
+const authUser = authService.getUser();
+const currentUser: User = authUser
+  ? {
+      id: authUser.id,
+      name: authUser.displayName,
+      avatar: authUser.avatar,
+      status: 'online',
+    }
+  : mockUsers[0];
+
 const initialState: AppState = {
-  currentUser: mockUsers[0],
+  currentUser,
   users: mockUsers,
   chats: mockChats,
   messages: mockMessages,
