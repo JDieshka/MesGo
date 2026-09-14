@@ -341,12 +341,22 @@ func handleSignaling(client *Client, payload json.RawMessage) {
 		return
 	}
 
+	// CRITICAL: Add sender ID to the message
 	signal.From = client.UserID.String()
+	
+	log.Printf("[Signaling] Message type: %s, from: %s, to: %s", signal.Type, signal.From, signal.To)
+
+	// CRITICAL: Marshal the updated signal object, not the original payload
+	updatedPayload, err := json.Marshal(signal)
+	if err != nil {
+		log.Printf("Signaling marshal error: %v", err)
+		return
+	}
 
 	// Route signaling message to target
 	response, _ := json.Marshal(WSMessage{
 		Type:    "signaling",
-		Payload: payload,
+		Payload: updatedPayload,
 	})
 
 	if signal.To != "" {
