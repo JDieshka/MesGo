@@ -1,6 +1,5 @@
 /**
- * WebRTC Manager
- * Handles peer connections for voice/video calls and screen sharing
+ * WebRTC Manager - Complete rewrite for proper screen share support
  */
 
 export interface WebRTCConfig {
@@ -11,7 +10,7 @@ export interface WebRTCConfig {
   onNegotiationNeeded: (offer: RTCSessionDescriptionInit, peerId: string) => void;
   onConnectionStateChange: (state: RTCPeerConnectionState, peerId: string) => void;
   onScreenTrack: (stream: MediaStream | null, peerId: string) => void;
-  onStreamsChange?: () => void; // Callback when streams change
+  onStreamsChange?: () => void;
 }
 
 const ICE_SERVERS: RTCIceServer[] = [
@@ -27,7 +26,7 @@ interface PeerState {
   peerId: string;
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
-  screenStream: MediaStream | null;
+  remoteScreenStream: MediaStream | null;
 }
 
 export class WebRTCManager {
@@ -36,6 +35,7 @@ export class WebRTCManager {
   private screenStream: MediaStream | null = null;
   private config: WebRTCConfig;
   private isInitiator: boolean = false;
+  private originalVideoTrack: MediaStreamTrack | null = null;
 
   constructor(config: WebRTCConfig) {
     this.config = config;
@@ -51,6 +51,9 @@ export class WebRTCManager {
         },
         video: video ? { width: 1280, height: 720 } : false,
       });
+
+      // Save original video track for later restoration
+      this.originalVideoTrack = this.localStream.getVideoTracks()[0] || null;
 
       this.config.onLocalStream(this.localStream);
       return this.localStream;
@@ -70,7 +73,7 @@ export class WebRTCManager {
       peerId,
       localStream: this.localStream,
       remoteStream: null,
-      screenStream: null,
+      remoteScreenStream: null,
     };
 
     this.peers.set(peerId, peerState);
@@ -89,61 +92,65 @@ export class WebRTCManager {
       }
     };
 
-    // Remote stream
+    // Remote stream - handle both camera and screen tracks
     connection.ontrack = (event) => {
-      console.log('[WebRTC] ontrack event:', event.track.kind, event.track.label);
-      
       const track = event.track;
-      
-      // Create or get remote stream
-      let remoteStream = peerState.remoteStream;
-      if (!remoteStream) {
-        remoteStream = new MediaStream();
-        peerState.remoteStream = remoteStream;
-      }
-      
-      // Add track to stream
-      remoteStream.addTrack(track);
-      
-      // Check if it's a screen share track
-      if (track.kind === 'video' && track.label?.includes('screen')) {
-        console.log('[WebRTC] Screen track received');
-        this.config.onScreenTrack(remoteStream, peerId);
+      console.log('[WebRTC] ontrack:', track.kind, 'label:', track.label, 'id:', track.id);
+
+      // Determine if this is a screen share track
+      // Screen share tracks typically have specific labels
+      const isScreen = track.kind === 'video' && (
+        track.label?.includes('screen') ||
+        track.label?.includes('display') ||
+        track.label?.includes('window') ||
+        track.label?.includes('tab')
+      );
+
+      if (isScreen) {
+        console.log('[WebRTC] Screen track received from:', peerId);
+        // Create a separate stream for screen share
+        let screenStream = peerState.remoteScreenStream;
+        if (!screenStream) {
+          screenStream = new MediaStream();
+          peerState.remoteScreenStream = screenStream;
+        }
+        screenStream.addTrack(track);
+        this.config.onScreenTrack(screenStream, peerId);
       } else {
+        // Regular camera/audio track
+        let remoteStream = peerState.remoteStream;
+        if (!remoteStream) {
+          remoteStream = new MediaStream();
+          peerState.remoteStream = remoteStream;
+        }
+        remoteStream.addTrack(track);
         console.log('[WebRTC] Remote stream updated with track:', track.kind);
         this.config.onRemoteStream(remoteStream);
       }
-      
+
       // Notify about streams change
       if (this.config.onStreamsChange) {
         this.config.onStreamsChange();
       }
-      
+
       // Handle track end
       track.onended = () => {
-        console.log('[WebRTC] Track ended:', track.kind);
-        remoteStream!.removeTrack(track);
+        console.log('[WebRTC] Track ended:', track.kind, track.label);
+        if (isScreen && peerState.remoteScreenStream) {
+          peerState.remoteScreenStream.removeTrack(track);
+          this.config.onScreenTrack(null, peerId);
+        } else if (peerState.remoteStream) {
+          peerState.remoteStream.removeTrack(track);
+        }
         if (this.config.onStreamsChange) {
           this.config.onStreamsChange();
         }
       };
     };
 
-    // Negotiation needed (for adding tracks later)
-    connection.onnegotiationneeded = async () => {
-      if (isInitiator) {
-        try {
-          const offer = await connection.createOffer();
-          await connection.setLocalDescription(offer);
-          this.config.onNegotiationNeeded(offer, peerId);
-        } catch (err) {
-          console.error('[WebRTC] Negotiation error:', err);
-        }
-      }
-    };
-
     // Connection state
     connection.onconnectionstatechange = () => {
+      console.log('[WebRTC] Connection state:', connection.connectionState, 'for peer:', peerId);
       this.config.onConnectionStateChange(connection.connectionState, peerId);
     };
 
@@ -183,43 +190,48 @@ export class WebRTCManager {
     await peer.connection.addIceCandidate(new RTCIceCandidate(candidate));
   }
 
+  /**
+   * Start screen share - replaces camera track with screen track
+   * and triggers renegotiation so remote peer receives the new track
+   */
   async startScreenShare(): Promise<MediaStream> {
     try {
       this.screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           cursor: 'always',
-          displaySurface: 'monitor',
         } as any,
         audio: true,
       });
 
-      // Replace video track in all peer connections
       const screenTrack = this.screenStream.getVideoTracks()[0];
-      
-      // Mark track as screen share
-      (screenTrack as any).isScreenShare = true;
+      console.log('[WebRTC] Screen share started, track label:', screenTrack.label);
 
+      // Replace video track in all peer connections
       for (const [peerId, peer] of this.peers) {
-        const sender = peer.connection.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) {
-          await sender.replaceTrack(screenTrack);
-          console.log('[WebRTC] Replaced video track with screen share track for peer:', peerId);
+        const senders = peer.connection.getSenders();
+        const videoSender = senders.find(s => s.track?.kind === 'video');
+        
+        if (videoSender) {
+          await videoSender.replaceTrack(screenTrack);
+          console.log('[WebRTC] Replaced video track with screen for peer:', peerId);
           
-          // CRITICAL: Need to renegotiate after replaceTrack so remote peer gets the new track
+          // CRITICAL: Trigger renegotiation so remote peer receives the new track
           try {
             const offer = await peer.connection.createOffer();
             await peer.connection.setLocalDescription(offer);
+            console.log('[WebRTC] Sending renegotiation offer for screen share to:', peerId);
             this.config.onNegotiationNeeded(offer, peerId);
-            console.log('[WebRTC] Renegotiation initiated for screen share');
           } catch (err) {
-            console.error('[WebRTC] Renegotiation failed:', err);
+            console.error('[WebRTC] Renegotiation failed for peer:', peerId, err);
           }
+        } else {
+          console.warn('[WebRTC] No video sender found for peer:', peerId);
         }
       }
 
-      // Handle screen share stop
+      // Handle screen share stop (user clicks "Stop sharing")
       screenTrack.onended = () => {
-        console.log('[WebRTC] Screen share track ended');
+        console.log('[WebRTC] Screen share track ended by user');
         this.stopScreenShare();
       };
 
@@ -230,23 +242,31 @@ export class WebRTCManager {
     }
   }
 
+  /**
+   * Stop screen share - restores camera track
+   */
   async stopScreenShare(): Promise<void> {
     if (this.screenStream) {
       this.screenStream.getTracks().forEach(track => track.stop());
       this.screenStream = null;
     }
 
-    // Restore camera track (or remove video if camera was off)
+    // Restore original camera track
     for (const [peerId, peer] of this.peers) {
-      const cameraTrack = this.localStream?.getVideoTracks()[0];
-      const sender = peer.connection.getSenders().find(s => s.track?.kind === 'video');
+      const senders = peer.connection.getSenders();
+      const videoSender = senders.find(s => s.track?.kind === 'video');
 
-      if (sender) {
-        if (cameraTrack) {
-          await sender.replaceTrack(cameraTrack);
-        } else {
-          sender.track?.stop();
-          await sender.replaceTrack(null as any);
+      if (videoSender && this.originalVideoTrack) {
+        try {
+          await videoSender.replaceTrack(this.originalVideoTrack);
+          console.log('[WebRTC] Restored camera track for peer:', peerId);
+          
+          // Renegotiate to restore camera on remote side
+          const offer = await peer.connection.createOffer();
+          await peer.connection.setLocalDescription(offer);
+          this.config.onNegotiationNeeded(offer, peerId);
+        } catch (err) {
+          console.error('[WebRTC] Failed to restore camera for peer:', peerId, err);
         }
       }
     }
@@ -268,10 +288,6 @@ export class WebRTCManager {
     }
   }
 
-  async addPeer(peerId: string): Promise<RTCPeerConnection> {
-    return this.createPeerConnection(peerId, this.isInitiator);
-  }
-
   removePeer(peerId: string): void {
     const peer = this.peers.get(peerId);
     if (peer) {
@@ -282,18 +298,14 @@ export class WebRTCManager {
   }
 
   cleanup(): void {
-    // Stop all tracks
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => track.stop());
       this.localStream = null;
     }
-
     if (this.screenStream) {
       this.screenStream.getTracks().forEach(track => track.stop());
       this.screenStream = null;
     }
-
-    // Close all peer connections
     for (const [peerId, peer] of this.peers) {
       peer.connection.close();
     }
@@ -309,10 +321,18 @@ export class WebRTCManager {
   }
 
   getRemoteStream(): MediaStream | null {
-    // Get remote stream from first peer
     for (const peer of this.peers.values()) {
       if (peer.remoteStream) {
         return peer.remoteStream;
+      }
+    }
+    return null;
+  }
+
+  getRemoteScreenStream(): MediaStream | null {
+    for (const peer of this.peers.values()) {
+      if (peer.remoteScreenStream) {
+        return peer.remoteScreenStream;
       }
     }
     return null;

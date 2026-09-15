@@ -133,7 +133,9 @@ export class CallManager {
         }
       },
       onScreenTrack: (stream, peerId) => {
-        console.log('[CallManager] Screen track received from:', peerId);
+        console.log('[CallManager] Screen track received from:', peerId, stream ? 'with stream' : 'null');
+        // Update screen sharing state based on whether stream exists
+        this.state.isScreenSharing = stream !== null;
         this.stateHandler(this.state);
       },
       onStreamsChange: () => {
