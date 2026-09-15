@@ -12,7 +12,8 @@ export default function CallOverlay() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
-  const screenRef = useRef<HTMLVideoElement>(null);
+  const localScreenRef = useRef<HTMLVideoElement>(null);
+  const remoteScreenRef = useRef<HTMLVideoElement>(null);
 
   const activeChat = call.chatId ? chats.find(c => c.id === call.chatId) : null;
 
@@ -48,6 +49,43 @@ export default function CallOverlay() {
       return () => clearInterval(retryInterval);
     }
   }, [call.isActive, callManager]);
+
+  // Handle LOCAL screen share stream (for the sender)
+  useEffect(() => {
+    if (!call.isActive || !callManager || !call.isScreenSharing) return;
+
+    const setupLocalScreen = () => {
+      const webrtc = callManager.getWebRTC();
+      if (!webrtc) return false;
+
+      const screenStream = webrtc.getScreenStream();
+      if (screenStream && localScreenRef.current) {
+        console.log('[CallOverlay] Setting LOCAL screen stream');
+        localScreenRef.current.srcObject = screenStream;
+        return true;
+      }
+      return false;
+    };
+
+    if (!setupLocalScreen()) {
+      console.log('[CallOverlay] Local screen stream not ready, will retry...');
+      const retryInterval = setInterval(() => {
+        if (setupLocalScreen()) {
+          clearInterval(retryInterval);
+        }
+      }, 100);
+      
+      const timeout = setTimeout(() => {
+        clearInterval(retryInterval);
+        console.log('[CallOverlay] Local screen stream setup timeout');
+      }, 5000);
+      
+      return () => {
+        clearInterval(retryInterval);
+        clearTimeout(timeout);
+      };
+    }
+  }, [call.isActive, callManager, call.isScreenSharing]);
 
   // Handle remote streams from WebRTC
   useEffect(() => {
@@ -113,9 +151,9 @@ export default function CallOverlay() {
       if (!webrtc) return false;
 
       const screenStream = webrtc.getRemoteScreenStream();
-      if (screenStream && screenRef.current) {
+      if (screenStream && remoteScreenRef.current) {
         console.log('[CallOverlay] Setting remote screen stream');
-        screenRef.current.srcObject = screenStream;
+        remoteScreenRef.current.srcObject = screenStream;
         return true;
       }
       return false;
@@ -234,12 +272,19 @@ export default function CallOverlay() {
         {/* Screen Share - FULL SCREEN when active */}
         {call.isScreenSharing ? (
           <div className="absolute inset-0 bg-black flex items-center justify-center">
-            {/* Remote screen share */}
+            {/* Local screen share (for sender) */}
             <video
-              ref={screenRef}
+              ref={localScreenRef}
               autoPlay
               playsInline
               className="w-full h-full object-contain"
+            />
+            {/* Remote screen share (for receiver) */}
+            <video
+              ref={remoteScreenRef}
+              autoPlay
+              playsInline
+              className="absolute inset-0 w-full h-full object-contain"
             />
             <div className="absolute top-4 left-4 px-3 py-1.5 bg-red-500/90 rounded-lg text-white text-sm flex items-center gap-2">
               <Monitor className="w-4 h-4" />

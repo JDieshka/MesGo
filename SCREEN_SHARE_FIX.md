@@ -2,8 +2,9 @@
 
 ## 🐛 Проблемы
 
-1. **Поверх стрима мигает иконка пользователя** - UI показывал одновременно screen share overlay и video grid
-2. **Видео не транслируется другому участнику** - при включении screen share второй участник не видел экран
+1. **Мигающая иконка при screen share** - UI показывал одновременно screen share overlay и video grid
+2. **Screen share не транслировался** - при включении screen share второй участник не видел экран
+3. **Локальный screen share не отображался** - отправитель не видел свой экран
 
 ## 🔍 Корень проблем
 
@@ -18,6 +19,11 @@
 **Причина:** При `replaceTrack()` событие `ontrack` НЕ вызывается на стороне получателя. WebRTC требует renegotiation для передачи нового трека.
 
 **Решение:** После `replaceTrack()` создать новый offer и отправить его через signaling, чтобы получатель получил новый track через renegotiation.
+
+### Проблема 3: Локальный screen share не отображается
+**Причина:** Использовался один `screenRef` для локального и удалённого screen share, что приводило к конфликтам.
+
+**Решение:** Разделить на `localScreenRef` (для отправителя) и `remoteScreenRef` (для получателя).
 
 ## ✅ Что было исправлено
 
@@ -128,15 +134,76 @@ onScreenTrack: (stream, peerId) => {
 
 **Ключевые изменения:**
 
-#### a) Условный рендеринг (без мигающей иконки)
+#### a) Разделение refs для screen share
+```typescript
+const localScreenRef = useRef<HTMLVideoElement>(null);   // Для отправителя
+const remoteScreenRef = useRef<HTMLVideoElement>(null);  // Для получателя
+```
+
+#### b) Отдельные useEffect для локального и удалённого screen share
+```typescript
+// Handle LOCAL screen share stream (for the sender)
+useEffect(() => {
+  if (!call.isActive || !callManager || !call.isScreenSharing) return;
+
+  const setupLocalScreen = () => {
+    const webrtc = callManager.getWebRTC();
+    if (!webrtc) return false;
+
+    const screenStream = webrtc.getScreenStream();
+    if (screenStream && localScreenRef.current) {
+      console.log('[CallOverlay] Setting LOCAL screen stream');
+      localScreenRef.current.srcObject = screenStream;
+      return true;
+    }
+    return false;
+  };
+
+  // ... retry logic
+}, [call.isActive, callManager, call.isScreenSharing]);
+
+// Handle REMOTE screen share stream (for the receiver)
+useEffect(() => {
+  if (!call.isActive || !callManager) return;
+
+  const setupScreenStream = () => {
+    const webrtc = callManager.getWebRTC();
+    if (!webrtc) return false;
+
+    const screenStream = webrtc.getRemoteScreenStream();
+    if (screenStream && remoteScreenRef.current) {
+      console.log('[CallOverlay] Setting remote screen stream');
+      remoteScreenRef.current.srcObject = screenStream;
+      return true;
+    }
+    return false;
+  };
+
+  // ... retry logic
+}, [call.isActive, callManager, call.isScreenSharing]);
+```
+
+#### c) Условный рендеринг (без мигающей иконки)
 ```tsx
 {/* Main Content */}
 <div className="flex-1 relative flex items-center justify-center overflow-hidden">
   {/* Screen Share - FULL SCREEN when active */}
   {call.isScreenSharing ? (
     <div className="absolute inset-0 bg-black flex items-center justify-center">
-      {/* Remote screen share */}
-      <video ref={screenRef} autoPlay playsInline className="w-full h-full object-contain" />
+      {/* Local screen share (for sender) */}
+      <video
+        ref={localScreenRef}
+        autoPlay
+        playsInline
+        className="w-full h-full object-contain"
+      />
+      {/* Remote screen share (for receiver) */}
+      <video
+        ref={remoteScreenRef}
+        autoPlay
+        playsInline
+        className="absolute inset-0 w-full h-full object-contain"
+      />
       
       {/* Local camera in corner */}
       <div className="absolute bottom-4 right-4 w-48 h-36 rounded-xl overflow-hidden border-2 border-gray-700">
@@ -155,44 +222,6 @@ onScreenTrack: (stream, peerId) => {
 </div>
 ```
 
-#### b) Отдельный useEffect для remote screen stream
-```typescript
-// Handle remote screen share stream
-useEffect(() => {
-  if (!call.isActive || !callManager) return;
-
-  const setupScreenStream = () => {
-    const webrtc = callManager.getWebRTC();
-    if (!webrtc) return false;
-
-    const screenStream = webrtc.getRemoteScreenStream();
-    if (screenStream && screenRef.current) {
-      console.log('[CallOverlay] Setting remote screen stream');
-      screenRef.current.srcObject = screenStream;
-      return true;
-    }
-    return false;
-  };
-
-  if (!setupScreenStream()) {
-    const retryInterval = setInterval(() => {
-      if (setupScreenStream()) {
-        clearInterval(retryInterval);
-      }
-    }, 100);
-    
-    const timeout = setTimeout(() => {
-      clearInterval(retryInterval);
-    }, 10000);
-    
-    return () => {
-      clearInterval(retryInterval);
-      clearTimeout(timeout);
-    };
-  }
-}, [call.isActive, callManager, call.isScreenSharing]);
-```
-
 ## 🔄 Поток данных при screen share
 
 ### Отправитель (User A):
@@ -205,6 +234,8 @@ useEffect(() => {
 6. setLocalDescription() устанавливает offer
 7. onNegotiationNeeded() отправляет offer через signaling
 8. Signaling → Server → User B
+9. localScreenRef.current.srcObject = screenStream
+10. ✅ User A видит свой screen share
 ```
 
 ### Получатель (User B):
@@ -221,8 +252,8 @@ useEffect(() => {
 10. onScreenTrack() вызывается с stream
 11. CallManager обновляет state.isScreenSharing = true
 12. UI перерисовывается
-13. useEffect устанавливает screenRef.current.srcObject = screenStream
-14. Screen share отображается на экране User B
+13. useEffect устанавливает remoteScreenRef.current.srcObject = screenStream
+14. ✅ User B видит screen share User A
 ```
 
 ## 🎨 UI поведение
@@ -234,9 +265,10 @@ useEffect(() => {
 ├─────────────────────────────────────┤
 │                                     │
 │                                     │
-│     Remote Screen Share             │
+│     Screen Share                    │
 │     (fullscreen)                    │
-│                                     │
+│     - Локальный для отправителя     │
+│     - Удалённый для получателя      │
 │                                     │
 │                          ┌────────┐ │
 │                          │ Local  │ │
@@ -287,7 +319,7 @@ npm run build
 1. User A нажимает "Демонстрация экрана" (🖥️)
 2. Выбирает экран/окно
 3. ✅ **User A видит:**
-   - Screen share на весь экран
+   - Свой screen share на весь экран
    - Свою камеру в правом нижнем углу
    - **НЕТ мигающей иконки пользователя**
 4. ✅ **User B видит:**
@@ -303,6 +335,7 @@ npm run build
 [WebRTC] Replaced video track with screen for peer: user-b-id
 [WebRTC] Sending renegotiation offer for screen share to: user-b-id
 [CallManager] Negotiation needed, sending offer to: user-b-id
+[CallOverlay] Setting LOCAL screen stream
 ```
 
 **User B (получатель):**
@@ -322,6 +355,8 @@ npm run build
 ## 📊 Ожидаемые результаты
 
 ✅ **Мигающая иконка исчезла** - UI показывает только screen share  
+✅ **Локальный screen share виден** - отправитель видит свой экран  
+✅ **Удалённый screen share виден** - получатель видит экран отправителя  
 ✅ **Видео транслируется** - второй участник видит экран  
 ✅ **Камера видна** - локальная камера в углу экрана  
 ✅ **Плавное переключение** - между video и screen share  
@@ -331,12 +366,14 @@ npm run build
 
 - `src/services/webrtc.ts` - полная переработка с renegotiation и разделением streams
 - `src/services/callManager.ts` - обновление состояния при screen track
-- `src/components/CallOverlay.tsx` - полная переработка UI с условным рендерингом
+- `src/components/CallOverlay.tsx` - полная переработка UI с разделением refs
 
 ## 🎯 Итог
 
 Все проблемы с трансляцией экрана решены:
 - ✅ Мигающая иконка пользователя исчезла
+- ✅ Локальный screen share отображается для отправителя
+- ✅ Удалённый screen share отображается для получателя
 - ✅ Видео транслируется другому участнику
 - ✅ UI корректно переключается между режимами
 - ✅ Renegotiation работает правильно
