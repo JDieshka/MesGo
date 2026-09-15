@@ -1,38 +1,84 @@
 services:
-  postgres:
+  # PostgreSQL Database
+  db:
     image: postgres:16-alpine
-    container_name: gotalk-postgres
+    container_name: gotalk-db
     environment:
-      POSTGRES_USER: gotalk
-      POSTGRES_PASSWORD: gotalk
-      POSTGRES_DB: gotalk
+      POSTGRES_USER: ${POSTGRES_USER:-gotal_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_password_in_production}
+      POSTGRES_DB: ${POSTGRES_DB:-gotal_db}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./server/migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gotalk"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gotal_user}"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - gotalk-network
+    restart: unless-stopped
 
+  # Go Backend Server
   server:
     build:
       context: ./server
       dockerfile: Dockerfile
     container_name: gotalk-server
     environment:
-      DATABASE_URL: postgres://gotalk:gotalk@postgres:5432/gotalk?sslmode=disable
-      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      DATABASE_URL: postgres://${POSTGRES_USER:-gotal_user}:${POSTGRES_PASSWORD:-change_this_password_in_production}@db:5432/${POSTGRES_DB:-gotal_db}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-change_this_to_a_secure_random_string_at_least_32_chars}
+      JWT_EXPIRY: ${JWT_EXPIRY:-72h}
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      SERVER_HOST: ${SERVER_HOST:-0.0.0.0}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      USE_SSL: ${USE_SSL:-false}
+      SSL_CERT_FILE: ${SSL_CERT_FILE:-/app/certs/cert.pem}
+      SSL_KEY_FILE: ${SSL_KEY_FILE:-/app/certs/key.pem}
+      TURN_SERVER_URL: ${TURN_SERVER_URL:-stun:stun.l.google.com:19302}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
-      - "8080:8080"
-      - "8443:8443"
+      - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
-    volumes:
-      - ./dist:/app/dist
+    networks:
+      - gotalk-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${SERVER_PORT:-8080}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Frontend (Nginx for static files + reverse proxy)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: gotalk-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - server
+    networks:
+      - gotalk-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
 
 volumes:
   postgres_data:
+    driver: local
+
+networks:
+  gotalk-network:
+    driver: bridge

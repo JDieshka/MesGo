@@ -1,0 +1,129 @@
+# GoTalk Production Docker Compose
+
+This configuration is optimized for production deployment with SSL termination via nginx.
+
+## Features
+
+- **Nginx** as reverse proxy with SSL termination
+- **Automatic HTTPS** with Let's Encrypt (certbot)
+- **Network isolation** between services
+- **Health checks** for all services
+- **Auto-restart** policies
+- **Environment variables** from `.env` file
+
+## Prerequisites
+
+1. Docker and Docker Compose installed
+2. Domain name pointing to your server
+3. Ports 80 and 443 available
+
+## Quick Start
+
+### 1. Copy environment file
+
+```bash
+cp .env.example .env
+```
+
+### 2. Edit `.env` file
+
+Set your production values:
+- `JWT_SECRET` - Generate a secure random string (at least 32 characters)
+- `POSTGRES_PASSWORD` - Strong password for database
+- `ALLOWED_ORIGINS` - Your production domain(s)
+- `USE_SSL=true` - Enable SSL
+
+### 3. Generate SSL certificates (optional, for production)
+
+For Let's Encrypt:
+```bash
+docker run --rm -it -v $(pwd)/certs:/etc/letsencrypt \
+  certbot/certbot certonly --standalone \
+  -d yourdomain.com -d www.yourdomain.com \
+  --email your@email.com --agree-tos
+```
+
+Or copy existing certificates to `./certs/`:
+- `cert.pem` - Your SSL certificate
+- `key.pem` - Your SSL private key
+
+### 4. Start services
+
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+### 5. Check status
+
+```bash
+docker-compose -f docker-compose.prod.yml ps
+docker-compose -f docker-compose.prod.yml logs -f
+```
+
+## Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| frontend | 80, 443 | Nginx serving React app + reverse proxy |
+| server | internal | Go backend API |
+| db | internal | PostgreSQL database |
+
+## Useful Commands
+
+```bash
+# View logs
+docker-compose -f docker-compose.prod.yml logs -f [service_name]
+
+# Restart a service
+docker-compose -f docker-compose.prod.yml restart [service_name]
+
+# Stop all services
+docker-compose -f docker-compose.prod.yml down
+
+# Stop and remove volumes (WARNING: deletes all data!)
+docker-compose -f docker-compose.prod.yml down -v
+
+# Run database migrations
+docker-compose -f docker-compose.prod.yml exec server ./gotalk-server migrate
+
+# Backup database
+docker-compose -f docker-compose.prod.yml exec db pg_dump -U gotal_user gotal_db > backup.sql
+
+# Restore database
+docker-compose -f docker-compose.prod.yml exec -T db psql -U gotal_user gotal_db < backup.sql
+```
+
+## Security Notes
+
+1. **Never commit `.env` file** - It contains secrets
+2. **Change default passwords** - Especially `JWT_SECRET` and `POSTGRES_PASSWORD`
+3. **Use HTTPS in production** - Required for WebRTC (camera/microphone access)
+4. **Configure firewall** - Only expose ports 80 and 443
+5. **Regular backups** - Set up automated database backups
+
+## Troubleshooting
+
+### Frontend can't connect to backend
+
+Check that nginx configuration is correct and the server is running:
+```bash
+docker-compose -f docker-compose.prod.yml logs frontend
+docker-compose -f docker-compose.prod.yml logs server
+```
+
+### SSL certificate issues
+
+Ensure certificates are in the correct location and have proper permissions:
+```bash
+ls -la ./certs/
+chmod 644 ./certs/cert.pem
+chmod 600 ./certs/key.pem
+```
+
+### Database connection errors
+
+Verify database is healthy:
+```bash
+docker-compose -f docker-compose.prod.yml ps db
+docker-compose -f docker-compose.prod.yml logs db
+```
